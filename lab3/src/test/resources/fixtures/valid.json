@@ -1,0 +1,30 @@
+{
+  "schema_version" : 1,
+  "contacts" : [ {
+    "type" : "contact",
+    "name" : "Анна Белова",
+    "phone" : "+79130000004",
+    "email" : "belova@mail.ru",
+    "organization" : "ИП Белова"
+  }, {
+    "type" : "corporate",
+    "name" : "Игорь Лесной",
+    "phone" : "+79130000003",
+    "email" : "les@corp.local",
+    "organization" : "ООО \"Альфа\"; филиал",
+    "position" : "Инженер",
+    "internal_number" : "204"
+  }, {
+    "type" : "contact",
+    "name" : "Ирина Котова",
+    "phone" : "+79130000002",
+    "email" : "kotova@mail.ru",
+    "organization" : "НГТУ"
+  }, {
+    "type" : "emergency",
+    "name" : "Служба спасения",
+    "phone" : "112",
+    "email" : "",
+    "organization" : "МЧС"
+  } ]
+}

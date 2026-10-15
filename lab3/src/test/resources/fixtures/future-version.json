@@ -1,0 +1,4 @@
+{
+  "schema_version" : 2,
+  "contacts" : [ { "type" : "contact", "full_name" : "Анна Белова" } ]
+}
