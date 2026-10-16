@@ -39,6 +39,9 @@ import org.example.store.TrieStore;
 import org.example.tasks.GenerateContactsTask;
 import org.example.tasks.LoadCsvTask;
 import org.example.tasks.SaveCsvTask;
+import org.example.io.ContactFormat;
+import org.example.tasks.ExportTask;
+import org.example.tasks.ImportTask;
 
 import java.io.File;
 import java.util.List;
@@ -125,20 +128,24 @@ public class MainApp extends Application {
         Button generate = new Button("Сгенерировать");
         generate.setOnAction(e -> onGenerate());
         Button clear = new Button("Очистить");
+        Button export = new Button("Экспорт");
+        export.setOnAction(e -> onExport());
+        Button importBtn = new Button("Импорт");
+        importBtn.setOnAction(e -> onImport());
         clear.setOnAction(e -> onClear());
 
         generateField.setPrefColumnCount(7);
 
         var busy = runner.busyProperty();
         var selected = table.getSelectionModel().selectedItemProperty();
-        for (Button b : new Button[]{load, save, add, generate, clear}) {
+        for (Button b : new Button[]{load, save, add, generate, clear, export, importBtn}) {
             b.disableProperty().bind(busy);
         }
         edit.disableProperty().bind(busy.or(Bindings.createBooleanBinding(
                 () -> !(selected.get() instanceof Editable), selected)));
         delete.disableProperty().bind(busy.or(selected.isNull()));
 
-        return new ToolBar(load, save, new Separator(Orientation.VERTICAL),
+        return new ToolBar(load, save,  export, importBtn, new Separator(Orientation.VERTICAL),
                 add, edit, delete, new Separator(Orientation.VERTICAL),
                 new Label("Кол-во:"), generateField, generate, clear);
     }
@@ -247,6 +254,30 @@ public class MainApp extends Application {
         }, () -> statusLabel.setText("Загрузка отменена, данные не изменились"));
     }
 
+    private void onImport() {
+        FileChooser chooser = formatChooser("Импорт справочника");
+        File chosen = chooser.showOpenDialog(stage);
+        ContactFormat format;
+        if (chosen  == null) {
+            return;
+        }
+        try
+            {
+                format = ContactFormat.of(chosen.toPath());
+            }
+        catch (IllegalArgumentException e)
+            {
+                Alerts.error(e.getMessage());
+                return;
+            }
+        TrieStore<Contact> loaded = ContactStores.create();
+        runner.run(new ImportTask(chosen.toPath(), loaded, format), result -> {
+            store = loaded;
+            lastKey = null;
+            refresh("Импортировано " + result + " из " + chosen.getName());
+            }, () -> statusLabel.setText("Импорт отменён, данные не изменились"));
+    }
+
     private void showLoadErrors(LoadResult result) {
         List<CsvParseException> errors = result.getErrors();
         StringBuilder details = new StringBuilder();
@@ -277,6 +308,23 @@ public class MainApp extends Application {
         runner.run(new SaveCsvTask(file.toPath(), store),
                 saved -> statusLabel.setText("Сохранено " + saved + " в " + file.getName()),
                 () -> statusLabel.setText("Сохранение отменено"));
+    }
+    private void onExport() {
+        if (store.size() == 0) {
+            Alerts.error("Нечего сохранять — справочник пуст.");
+            return;
+        }
+        FileChooser chooser = formatChooser("Экспорт справочника");
+        chooser.setInitialFileName("contacts");
+        File chosen = chooser.showSaveDialog(stage);
+        if (chosen == null) {
+            return;
+        }
+        ContactFormat format = selectedFormat(chooser);
+        File file = withExtension(chosen, format);
+        runner.run(new ExportTask(file.toPath(), store, format),
+                saved -> statusLabel.setText("Экспортировано " + saved + " в " + file.getName()),
+                () -> statusLabel.setText("Экспорт отменён"));
     }
 
     private void onAdd() {
@@ -388,10 +436,36 @@ public class MainApp extends Application {
         triePane.show(store.snapshot(prefix, depthSpinner.getValue(), MAX_VISIBLE_NODES, lastKey), prefix);
     }
 
-    private static FileChooser csvChooser(String title) {
+    private static FileChooser csvChooser(String title)
+    {
         FileChooser chooser = new FileChooser();
         chooser.setTitle(title);
         chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("CSV", "*.csv"));
         return chooser;
+    }
+
+    private static FileChooser formatChooser(String title){
+        FileChooser fchooser = new FileChooser();
+        fchooser.setTitle(title);
+        for (ContactFormat f : ContactFormat.values()) {
+            fchooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(f.title(), f.pattern()));
+        }
+        return fchooser;
+    }
+
+    private static ContactFormat selectedFormat(FileChooser chooser) {
+        if (chooser.getSelectedExtensionFilter() == null) {
+            return ContactFormat.values()[0] ;
+        }
+        int i = chooser.getExtensionFilters().indexOf(chooser.getSelectedExtensionFilter());
+        return ContactFormat.values()[i];
+    }
+
+    private static File withExtension(File file, ContactFormat format) {
+        String name = file.getName().toLowerCase();
+        if (!name.endsWith("." + format.extension())) {
+            return new File(file.getPath() + "." + format.extension());
+        }
+        return file;
     }
 }
