@@ -7,6 +7,7 @@ import javafx.concurrent.Task;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
 import org.example.tasks.StoppableTask;
+import org.example.io.SerializationException;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -54,7 +55,16 @@ class BackgroundRunner {
             finish();
             Throwable error = task.getException();
             statusLabel.setText("Ошибка");
-            Alerts.error(error == null ? "Неизвестная ошибка" : error.getMessage());
+            if (error instanceof SerializationException se) {
+                String where = se.getLocation() == null ? "—" : se.getLocation();
+                Alerts.warningWithDetails(
+                        "Файл не прочитан",
+                        se.getMessage(),
+                        "Код: " + se.getError() + "\nГде: " + where);
+            } else {
+                Alerts.error(error == null ? "Неизвестная ошибка" : error.getMessage());
+            }
+
         });
 
         executor.execute(task);
