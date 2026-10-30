@@ -3,19 +3,17 @@ package org.example.csv;
 import org.example.model.Contact;
 import org.example.model.CorporateContact;
 import org.example.model.EmergencyContact;
-import org.example.store.EntityStore;
-import org.example.tasks.ProgressListener;
+import org.example.store.DuplicateKeyException;
+import org.example.store.Store;
 
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.function.BooleanSupplier;
 
 public class CsvLoader {
 
@@ -23,49 +21,44 @@ public class CsvLoader {
     private static final int CORPORATE_FIELDS = 7;
     private static final int PROGRESS_STEP = 500;
 
-    public LoadResult load(Path file, EntityStore<String, Contact> target) throws IOException {
-        return load(file, target, ProgressListener.NONE, () -> false);
+    public LoadResult load(Path file, Store<Contact> store) throws IOException {
+        return load(file, store, (done, total) -> { });
     }
 
-    public LoadResult load(Path file, EntityStore<String, Contact> target,
-                           ProgressListener progress, BooleanSupplier cancelled) throws IOException {
-        long totalBytes = Files.size(file);
-        List<CsvParseException> errors = new ArrayList<>();
+    public LoadResult load(Path file, Store<Contact> store, ProgressListener listener) throws IOException {
+        long fileSize = Files.size(file);
+        long bytesRead = 0;
         int loaded = 0;
+        List<CsvParseException> errors = new ArrayList<>();
 
-        try (CountingInputStream counter = new CountingInputStream(Files.newInputStream(file));
-             BufferedReader reader = new BufferedReader(new InputStreamReader(counter, StandardCharsets.UTF_8))) {
+        try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
             reader.readLine();
             String line;
             int lineNumber = 1;
-            while ((line = reader.readLine()) != null) {
+            while ((line = reader.readLine()) != null && !Thread.currentThread().isInterrupted()) {
                 lineNumber++;
-                if (cancelled.getAsBoolean()) {
-                    return new LoadResult(loaded, errors, true);
-                }
+                bytesRead += line.getBytes(StandardCharsets.UTF_8).length + 1;
                 if (lineNumber % PROGRESS_STEP == 0) {
-                    progress.onProgress(counter.getCount(), totalBytes);
+                    listener.onProgress(bytesRead, fileSize);
                 }
                 if (line.isBlank()) {
                     continue;
                 }
                 try {
-                    Contact contact = parseLine(line, lineNumber);
-                    if (!target.tryAdd(contact)) {
-                        throw new CsvParseException("Контакт с именем '" + contact.getName() + "' уже есть",
-                                lineNumber, CsvErrorCode.DUPLICATE_NAME);
-                    }
+                    store.add(parseLine(line, lineNumber));
                     loaded++;
                 } catch (CsvParseException e) {
                     errors.add(e);
+                } catch (DuplicateKeyException e) {
+                    errors.add(new CsvParseException(e.getMessage(), lineNumber, CsvErrorCode.DUPLICATE_NAME));
                 }
             }
         }
-        progress.onProgress(totalBytes, totalBytes);
-        return new LoadResult(loaded, errors, false);
+        listener.onProgress(fileSize, fileSize);
+        return new LoadResult(loaded, errors);
     }
 
-    public Contact parseLine(String line, int lineNumber) throws CsvParseException {
+    Contact parseLine(String line, int lineNumber) throws CsvParseException {
         String[] parts = CsvFormat.split(line, lineNumber);
         if (parts.length < BASE_FIELDS) {
             throw new CsvParseException("Недостаточно полей", lineNumber, CsvErrorCode.WRONG_FIELD_COUNT);
@@ -75,7 +68,6 @@ public class CsvLoader {
         String phone = parts[2].trim();
         String email = parts[3].trim();
         String organization = parts[4].trim();
-
         if (name.isEmpty()) {
             throw new CsvParseException("Пустое имя контакта", lineNumber, CsvErrorCode.EMPTY_REQUIRED_FIELD);
         }
@@ -92,13 +84,13 @@ public class CsvLoader {
                 }
                 String position = parts[5].trim();
                 String internalNumber = parts[6].trim();
-                if (!internalNumber.isEmpty() && !internalNumber.matches("\\d+")) {
+                if (!CorporateContact.isValidInternalNumber(internalNumber)) {
                     throw new CsvParseException("Внутренний номер содержит не цифры", lineNumber,
                             CsvErrorCode.BAD_NUMBER);
                 }
                 return new CorporateContact(name, phone, email, organization, position, internalNumber);
             default:
-                throw new CsvParseException("Неизвестный тип '" + type + "'", lineNumber, CsvErrorCode.UNKNOWN_TYPE);
+                throw new CsvParseException("Неизвестный тип " + type, lineNumber, CsvErrorCode.UNKNOWN_TYPE);
         }
     }
 }

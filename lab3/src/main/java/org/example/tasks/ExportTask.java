@@ -1,31 +1,25 @@
 package org.example.tasks;
 
 import javafx.concurrent.Task;
-import org.example.io.ContactFormat;
-import org.example.io.FileStorage;
+import org.example.io.Serializer;
 import org.example.model.Contact;
-import org.example.store.EntityStore;
 
 import java.nio.file.Path;
 
-public class ExportTask extends Task<Integer> {
+public class ExportTask extends Task<Void> {
 
     private final Path file;
-    private final EntityStore<String, Contact> source;
-    private final ContactFormat format;
+    private final Contact[] contacts;
 
-    public ExportTask(Path file, EntityStore<String, Contact> source, ContactFormat format) {
+    public ExportTask(Path file, Contact[] contacts) {
         this.file = file;
-        this.source = source;
-        this.format = format;
+        this.contacts = contacts;
     }
 
     @Override
-    protected Integer call() throws Exception {
-        updateMessage("Экспорт в " + file.getFileName() + " (" + format.title() + ")");
-        updateProgress(-1, 1);
-        int saved = new FileStorage<>(format.serializer()).save(file, source);
-        updateMessage("Экспортировано: " + saved);
-        return saved;
+    protected Void call() throws Exception {
+        updateMessage("Экспорт в " + file.getFileName());
+        Serializer.forFile(file).save(contacts, file);
+        return null;
     }
 }

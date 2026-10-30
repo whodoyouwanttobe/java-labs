@@ -24,8 +24,8 @@ public class CorporateContact extends Contact implements Editable {
     }
 
     @Override
-    public CorporateContact withName(String newName) {
-        return new CorporateContact(newName, phone, email, organization, position, internalNumber);
+    public String getType() {
+        return "Corporate";
     }
 
     @Override
@@ -37,31 +37,28 @@ public class CorporateContact extends Contact implements Editable {
         if (phone == null || phone.isBlank()) {
             errors.add("Пустой телефон");
         }
-        if (internalNumber != null && !internalNumber.isEmpty() && !internalNumber.matches("\\d+")) {
+        if (!isValidInternalNumber(internalNumber)) {
             errors.add("Внутренний номер должен содержать только цифры");
         }
         return errors;
     }
 
-    @Override
-    public String getType() {
-        return "Corporate";
+    public static boolean isValidInternalNumber(String number) {
+        return number == null || number.isEmpty() || number.matches("\\d+");
     }
 
     @Override
     public boolean equals(Object o) {
-        return super.equals(o)
-                && Objects.equals(position, ((CorporateContact) o).position)
-                && Objects.equals(internalNumber, ((CorporateContact) o).internalNumber);
+        if (!super.equals(o)) {
+            return false;
+        }
+        CorporateContact other = (CorporateContact) o;
+        return Objects.equals(position, other.position)
+                && Objects.equals(internalNumber, other.internalNumber);
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(super.hashCode(), position, internalNumber);
-    }
-
-    @Override
-    public String toString() {
-        return "CorporateContact{name='" + name + "', position='" + position + "', intNum='" + internalNumber + "'}";
     }
 }

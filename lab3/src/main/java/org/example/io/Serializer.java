@@ -1,14 +1,29 @@
 package org.example.io;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import org.example.model.Contact;
 
-public interface Serializer<T> {
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.Locale;
+
+public interface Serializer {
 
     int SCHEMA_VERSION = 1;
 
-    void write(T[] items, OutputStream out) throws IOException;
+    String getFormat();
 
-    T[] read(InputStream in) throws IOException, SerializationException;
+    void save(Contact[] contacts, Path file) throws IOException;
+
+    Contact[] load(Path file) throws IOException, SerializationException;
+
+    static Serializer forFile(Path file) {
+        String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
+        if (name.endsWith(".json")) {
+            return new JsonSerializer();
+        }
+        if (name.endsWith(".ctb")) {
+            return new BinarySerializer();
+        }
+        throw new IllegalArgumentException("Поддерживаются только файлы .json и .ctb");
+    }
 }

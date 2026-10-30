@@ -1,122 +1,111 @@
 package org.example.store;
 
+import java.util.Arrays;
 import java.util.Locale;
-import java.util.function.BiConsumer;
 import java.util.function.IntFunction;
 
 public class Trie<V> {
 
-    private static final class Node<V> {
-        final char symbol;
-        final Node<V> parent;
-
-        char[] symbols = new char[0];
-        Node<V>[] children = newNodes(0);
+    private static class Node<V> {
+        char symbol;
+        V value;
+        int count;
+        char[] letters = new char[0];
+        Node<V>[] children = newArray(0);
         int childCount;
 
-        V value;
-        int subtreeSize;
-
-        Node(char symbol, Node<V> parent) {
+        Node(char symbol) {
             this.symbol = symbol;
-            this.parent = parent;
         }
 
         int indexOf(char c) {
-            int lo = 0;
-            int hi = childCount - 1;
-            while (lo <= hi) {
-                int mid = (lo + hi) >>> 1;
-                if (symbols[mid] < c) {
-                    lo = mid + 1;
-                } else if (symbols[mid] > c) {
-                    hi = mid - 1;
-                } else {
+            int left = 0;
+            int right = childCount - 1;
+            while (left <= right) {
+                int mid = (left + right) / 2;
+                if (letters[mid] == c) {
                     return mid;
                 }
+                if (letters[mid] < c) {
+                    left = mid + 1;
+                } else {
+                    right = mid - 1;
+                }
             }
-            return -(lo + 1);
+            return -(left + 1);
         }
 
-        Node<V> child(char c) {
-            int i = indexOf(c);
-            return i >= 0 ? children[i] : null;
+        Node<V> getChild(char c) {
+            int index = indexOf(c);
+            return index >= 0 ? children[index] : null;
         }
 
         Node<V> addChild(char c) {
-            int i = indexOf(c);
-            if (i >= 0) {
-                return children[i];
+            int position = -(indexOf(c) + 1);
+            if (childCount == letters.length) {
+                int newSize = Math.max(2, childCount * 2);
+                letters = Arrays.copyOf(letters, newSize);
+                children = Arrays.copyOf(children, newSize);
             }
-            int pos = -(i + 1);
-            if (childCount == children.length) {
-                int newCapacity = childCount == 0 ? 2 : childCount * 2;
-                char[] newSymbols = new char[newCapacity];
-                Node<V>[] newChildren = newNodes(newCapacity);
-                System.arraycopy(symbols, 0, newSymbols, 0, childCount);
-                System.arraycopy(children, 0, newChildren, 0, childCount);
-                symbols = newSymbols;
-                children = newChildren;
-            }
-            System.arraycopy(symbols, pos, symbols, pos + 1, childCount - pos);
-            System.arraycopy(children, pos, children, pos + 1, childCount - pos);
-            Node<V> node = new Node<>(c, this);
-            symbols[pos] = c;
-            children[pos] = node;
+            System.arraycopy(letters, position, letters, position + 1, childCount - position);
+            System.arraycopy(children, position, children, position + 1, childCount - position);
+            Node<V> child = new Node<>(c);
+            letters[position] = c;
+            children[position] = child;
             childCount++;
-            return node;
+            return child;
         }
 
         void removeChild(char c) {
-            int i = indexOf(c);
-            if (i < 0) {
-                return;
-            }
-            System.arraycopy(symbols, i + 1, symbols, i, childCount - i - 1);
-            System.arraycopy(children, i + 1, children, i, childCount - i - 1);
+            int index = indexOf(c);
+            System.arraycopy(letters, index + 1, letters, index, childCount - index - 1);
+            System.arraycopy(children, index + 1, children, index, childCount - index - 1);
             childCount--;
             children[childCount] = null;
         }
 
         @SuppressWarnings("unchecked")
-        private static <V> Node<V>[] newNodes(int size) {
+        static <V> Node<V>[] newArray(int size) {
             return (Node<V>[]) new Node[size];
         }
     }
 
-    private Node<V> root = new Node<>('\0', null);
+    private Node<V> root = new Node<>(' ');
     private int nodeCount = 1;
 
     public static String normalize(String key) {
-        if (key == null) {
-            throw new IllegalArgumentException("Ключ не может быть null");
-        }
-        String result = key.trim().toLowerCase(Locale.ROOT);
-        if (result.isEmpty()) {
+        if (key == null || key.isBlank()) {
             throw new IllegalArgumentException("Ключ не может быть пустым");
         }
-        return result;
+        return key.trim().toLowerCase(Locale.ROOT);
     }
 
     private static String normalizePrefix(String prefix) {
         return prefix == null ? "" : prefix.trim().toLowerCase(Locale.ROOT);
     }
 
-    public int size() {
-        return root.subtreeSize;
-    }
-
-    public boolean isEmpty() {
-        return size() == 0;
-    }
-
-    public int nodeCount() {
-        return nodeCount;
-    }
-
-    public void clear() {
-        root = new Node<>('\0', null);
-        nodeCount = 1;
+    public boolean put(String key, V value) {
+        if (value == null) {
+            throw new IllegalArgumentException("Значение не может быть null");
+        }
+        String k = normalize(key);
+        Node<V> existing = find(k);
+        if (existing != null && existing.value != null) {
+            return false;
+        }
+        Node<V> node = root;
+        node.count++;
+        for (int i = 0; i < k.length(); i++) {
+            Node<V> next = node.getChild(k.charAt(i));
+            if (next == null) {
+                next = node.addChild(k.charAt(i));
+                nodeCount++;
+            }
+            node = next;
+            node.count++;
+        }
+        node.value = value;
+        return true;
     }
 
     public V get(String key) {
@@ -124,209 +113,100 @@ public class Trie<V> {
         return node == null ? null : node.value;
     }
 
-    public boolean containsKey(String key) {
-        return get(key) != null;
-    }
-
-    public V put(String key, V value) {
-        return insert(key, value, true);
-    }
-
-    public boolean putIfAbsent(String key, V value) {
-        return insert(key, value, false) == null;
-    }
-
     public V remove(String key) {
-        Node<V> node = find(normalize(key));
-        if (node == null || node.value == null) {
-            return null;
-        }
-        V old = node.value;
-        node.value = null;
-        for (Node<V> p = node; p != null; p = p.parent) {
-            p.subtreeSize--;
-        }
-        Node<V> current = node;
-        while (current != root && current.value == null && current.childCount == 0) {
-            Node<V> parent = current.parent;
-            parent.removeChild(current.symbol);
-            nodeCount--;
-            current = parent;
+        String k = normalize(key);
+        V old = get(k);
+        if (old != null) {
+            removeFrom(root, k, 0);
         }
         return old;
     }
 
     public int countWithPrefix(String prefix) {
         Node<V> node = find(normalizePrefix(prefix));
-        return node == null ? 0 : node.subtreeSize;
+        return node == null ? 0 : node.count;
     }
 
-    public V[] findWithPrefix(String prefix, int limit, IntFunction<V[]> arrayFactory) {
-        if (limit < 0) {
-            throw new IllegalArgumentException("limit < 0");
-        }
+    public V[] findWithPrefix(String prefix, int limit, IntFunction<V[]> newArray) {
         Node<V> node = find(normalizePrefix(prefix));
         if (node == null) {
-            return arrayFactory.apply(0);
+            return newArray.apply(0);
         }
-        V[] result = arrayFactory.apply(Math.min(limit, node.subtreeSize));
+        V[] result = newArray.apply(Math.min(limit, node.count));
         collect(node, result, 0);
         return result;
     }
 
-    public V[] values(IntFunction<V[]> arrayFactory) {
-        V[] result = arrayFactory.apply(size());
-        collect(root, result, 0);
-        return result;
+    public int size() {
+        return root.count;
     }
 
-    public void forEach(BiConsumer<String, ? super V> action) {
-        walk(root, new StringBuilder(), action);
+    public int nodeCount() {
+        return nodeCount;
     }
 
-    public TrieNodeView snapshot(int maxDepth) {
-        return snapshot("", maxDepth, nodeCount, null);
+    public void clear() {
+        root = new Node<>(' ');
+        nodeCount = 1;
     }
 
-    public TrieNodeView snapshot(String prefix, int maxDepth, int maxNodes, String highlightKey) {
-        String start = normalizePrefix(prefix);
-        Node<V> startNode = find(start);
-        if (startNode == null) {
+    public TrieNodeView snapshot(String prefix, int maxNodes) {
+        Node<V> start = find(normalizePrefix(prefix));
+        if (start == null) {
             return null;
         }
-        String highlight = highlightKey == null ? null : normalizePrefix(highlightKey);
-        return new SnapshotBuilder<>(startNode, start, highlight,
-                maxDepth, Math.max(1, Math.min(maxNodes, nodeCount))).build();
-    }
-
-    private V insert(String key, V value, boolean replace) {
-        if (value == null) {
-            throw new IllegalArgumentException("Значение не может быть null");
-        }
-        String k = normalize(key);
-        Node<V> node = root;
-        for (int i = 0; i < k.length(); i++) {
-            int before = node.childCount;
-            node = node.addChild(k.charAt(i));
-            if (node.parent.childCount > before) {
-                nodeCount++;
+        Node<V>[] queue = Node.newArray(maxNodes);
+        TrieNodeView[] views = new TrieNodeView[maxNodes];
+        queue[0] = start;
+        views[0] = toView(start);
+        int size = 1;
+        for (int head = 0; head < size; head++) {
+            Node<V> node = queue[head];
+            for (int i = 0; i < node.childCount && size < maxNodes; i++) {
+                queue[size] = node.children[i];
+                views[size] = toView(node.children[i]);
+                views[head].children()[i] = views[size];
+                size++;
             }
         }
-        V old = node.value;
-        if (old == null) {
-            node.value = value;
-            for (Node<V> p = node; p != null; p = p.parent) {
-                p.subtreeSize++;
-            }
-        } else if (replace) {
-            node.value = value;
-        }
-        return old;
+        return views[0];
     }
 
-    private Node<V> find(String k) {
+    private Node<V> find(String key) {
         Node<V> node = root;
-        for (int i = 0; i < k.length() && node != null; i++) {
-            node = node.child(k.charAt(i));
+        for (int i = 0; i < key.length() && node != null; i++) {
+            node = node.getChild(key.charAt(i));
         }
         return node;
     }
 
-    private int collect(Node<V> node, V[] out, int filled) {
-        if (filled == out.length) {
-            return filled;
+    private void removeFrom(Node<V> node, String key, int depth) {
+        node.count--;
+        if (depth == key.length()) {
+            node.value = null;
+            return;
         }
-        if (node.value != null) {
-            out[filled++] = node.value;
+        char c = key.charAt(depth);
+        Node<V> child = node.getChild(c);
+        removeFrom(child, key, depth + 1);
+        if (child.count == 0) {
+            node.removeChild(c);
+            nodeCount--;
         }
-        for (int i = 0; i < node.childCount && filled < out.length; i++) {
-            filled = collect(node.children[i], out, filled);
+    }
+
+    private int collect(Node<V> node, V[] result, int filled) {
+        if (node.value != null && filled < result.length) {
+            result[filled++] = node.value;
+        }
+        for (int i = 0; i < node.childCount && filled < result.length; i++) {
+            filled = collect(node.children[i], result, filled);
         }
         return filled;
     }
 
-    private void walk(Node<V> node, StringBuilder path, BiConsumer<String, ? super V> action) {
-        if (node.value != null) {
-            action.accept(path.toString(), node.value);
-        }
-        for (int i = 0; i < node.childCount; i++) {
-            path.append(node.symbols[i]);
-            walk(node.children[i], path, action);
-            path.setLength(path.length() - 1);
-        }
-    }
-
-    private static final class SnapshotBuilder<V> {
-        private final String highlight;
-        private final int maxDepth;
-        private final Node<V>[] nodes;
-        private final String[] prefixes;
-        private final int[] parents;
-        private final int[] depths;
-        private final int[] firstChild;
-        private final int[] includedChildren;
-        private int count;
-
-        @SuppressWarnings("unchecked")
-        SnapshotBuilder(Node<V> start, String startPrefix, String highlight, int maxDepth, int maxNodes) {
-            this.highlight = highlight;
-            this.maxDepth = maxDepth;
-            this.nodes = (Node<V>[]) new Node[maxNodes];
-            this.prefixes = new String[maxNodes];
-            this.parents = new int[maxNodes];
-            this.depths = new int[maxNodes];
-            this.firstChild = new int[maxNodes];
-            this.includedChildren = new int[maxNodes];
-            nodes[0] = start;
-            prefixes[0] = startPrefix;
-            parents[0] = -1;
-            count = 1;
-        }
-
-        TrieNodeView build() {
-            collectBreadthFirst();
-            TrieNodeView[] views = new TrieNodeView[count];
-            TrieNodeView[][] kids = new TrieNodeView[count][];
-            for (int i = 0; i < count; i++) {
-                kids[i] = new TrieNodeView[includedChildren[i]];
-            }
-            for (int i = count - 1; i >= 0; i--) {
-                Node<V> node = nodes[i];
-                views[i] = new TrieNodeView(node.symbol, prefixes[i], node.value != null, node.subtreeSize,
-                        isOnPath(prefixes[i]), includedChildren[i] < node.childCount, kids[i]);
-                int parent = parents[i];
-                if (parent >= 0) {
-                    kids[parent][i - firstChild[parent]] = views[i];
-                }
-            }
-            return views[0];
-        }
-
-        private void collectBreadthFirst() {
-            for (int head = 0; head < count; head++) {
-                Node<V> node = nodes[head];
-                if (depths[head] >= maxDepth) {
-                    continue;
-                }
-                for (int c = 0; c < node.childCount; c++) {
-                    if (count == nodes.length) {
-                        return;
-                    }
-                    if (includedChildren[head] == 0) {
-                        firstChild[head] = count;
-                    }
-                    includedChildren[head]++;
-                    nodes[count] = node.children[c];
-                    prefixes[count] = prefixes[head] + node.symbols[c];
-                    parents[count] = head;
-                    depths[count] = depths[head] + 1;
-                    count++;
-                }
-            }
-        }
-
-        private boolean isOnPath(String prefix) {
-            return highlight != null && highlight.startsWith(prefix);
-        }
+    private TrieNodeView toView(Node<V> node) {
+        return new TrieNodeView(node.symbol, node.value != null, node.count,
+                new TrieNodeView[node.childCount]);
     }
 }

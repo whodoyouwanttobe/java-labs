@@ -8,77 +8,43 @@ public class RaceDemo {
     private static final int THREADS = 8;
     private static final int PER_THREAD = 20_000;
 
-    private static int brokenLookups;
-
     public static void main(String[] args) throws InterruptedException {
-        int expected = THREADS * PER_THREAD;
+        Trie<Integer> trie = new Trie<>();
+        int failed = runThreads(number -> trie.put("k" + number, number));
+        System.out.println("Без синхронизации: ожидали " + THREADS * PER_THREAD
+                + ", в дереве " + trie.size() + ", упавших вставок " + failed);
 
-        Trie<Integer> unsafe = new Trie<>();
-        int[] failures = new int[THREADS];
-        runWriters(i -> unsafe.put(key(i), i), failures);
-        System.out.println("Без синхронизации (голый Trie):");
-        System.out.println("  ожидали " + expected + ", size() = " + unsafe.size()
-                + ", упавших вставок: " + sum(failures));
-        System.out.println("  реально находится по ключу: " + countFound(unsafe, expected)
-                + ", поиск упал с исключением: " + brokenLookups);
-
-        TrieStore<Integer> safe = new TrieStore<>(v -> key(v), Integer[]::new);
-        int[] safeFailures = new int[THREADS];
-        runWriters(safe::add, safeFailures);
-        System.out.println("С ReadWriteLock (TrieStore):");
-        System.out.println("  ожидали " + expected + ", size() = " + safe.size()
-                + ", упавших вставок: " + sum(safeFailures));
+        TrieStore<Integer> store = new TrieStore<>(number -> "k" + number, Integer[]::new);
+        failed = runThreads(store::add);
+        System.out.println("С synchronized: ожидали " + THREADS * PER_THREAD
+                + ", в дереве " + store.size() + ", упавших вставок " + failed);
     }
 
-    private interface Writer {
-        void write(int value);
-    }
-
-    private static void runWriters(Writer writer, int[] failures) throws InterruptedException {
+    private static int runThreads(Inserter inserter) throws InterruptedException {
+        int[] failed = new int[THREADS];
         Thread[] threads = new Thread[THREADS];
         for (int t = 0; t < THREADS; t++) {
             int id = t;
             threads[t] = new Thread(() -> {
                 for (int i = 0; i < PER_THREAD; i++) {
                     try {
-                        writer.write(i * THREADS + id);
+                        inserter.insert(i * THREADS + id);
                     } catch (RuntimeException e) {
-                        failures[id]++;
+                        failed[id]++;
                     }
                 }
             });
+            threads[t].start();
         }
-        for (Thread thread : threads) {
-            thread.start();
+        int total = 0;
+        for (int t = 0; t < THREADS; t++) {
+            threads[t].join();
+            total += failed[t];
         }
-        for (Thread thread : threads) {
-            thread.join();
-        }
+        return total;
     }
 
-    private static int countFound(Trie<Integer> trie, int expected) {
-        int found = 0;
-        for (int i = 0; i < expected; i++) {
-            try {
-                if (trie.get(key(i)) != null) {
-                    found++;
-                }
-            } catch (RuntimeException e) {
-                brokenLookups++;
-            }
-        }
-        return found;
-    }
-
-    private static String key(int value) {
-        return "k" + value;
-    }
-
-    private static int sum(int[] values) {
-        int s = 0;
-        for (int v : values) {
-            s += v;
-        }
-        return s;
+    private interface Inserter {
+        void insert(int number);
     }
 }

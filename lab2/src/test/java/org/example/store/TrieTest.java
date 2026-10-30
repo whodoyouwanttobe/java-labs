@@ -3,7 +3,11 @@ package org.example.store;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class TrieTest {
 
@@ -34,15 +38,14 @@ class TrieTest {
     }
 
     @Test
-    void putIfAbsentRejectsDuplicate() {
-        assertFalse(trie.putIfAbsent("анна", "5"));
+    void putDoesNotReplaceExistingKey() {
+        assertFalse(trie.put("анна", "5"));
         assertEquals("4", trie.get("Анна"));
     }
 
     @Test
-    void putReplacesValueWithoutChangingSize() {
-        trie.put("Анна", "5");
-        assertEquals(4, trie.size());
+    void emptyKeyIsRejected() {
+        assertThrows(IllegalArgumentException.class, () -> trie.put("  ", "x"));
     }
 
     @Test
@@ -52,7 +55,7 @@ class TrieTest {
     }
 
     @Test
-    void removePrunesUnusedNodes() {
+    void removeDeletesUnusedNodes() {
         int nodesBefore = trie.nodeCount();
         trie.remove("Анна");
         assertEquals(nodesBefore - 4, trie.nodeCount());
@@ -61,6 +64,7 @@ class TrieTest {
     @Test
     void removeMissingKeyReturnsNull() {
         assertNull(trie.remove("Пётр"));
+        assertEquals(4, trie.size());
     }
 
     @Test
@@ -69,7 +73,7 @@ class TrieTest {
     }
 
     @Test
-    void countUpdatesAfterRemove() {
+    void countChangesAfterRemove() {
         trie.remove("Иванов");
         assertEquals(1, trie.countWithPrefix("ива"));
     }
@@ -85,52 +89,13 @@ class TrieTest {
     }
 
     @Test
-    void findWithUnknownPrefixIsEmpty() {
-        assertEquals(0, trie.findWithPrefix("я", 10, String[]::new).length);
-    }
-
-    @Test
-    void emptyKeyIsRejected() {
-        assertThrows(IllegalArgumentException.class, () -> trie.put("  ", "x"));
-    }
-
-    @Test
-    void readsDoNotChangeSnapshot() {
-        trie.get("Анна");
-        trie.findWithPrefix("и", 10, String[]::new);
-        assertFalse(trie.snapshot(10).visited());
-    }
-
-    @Test
-    void snapshotHighlightsPathOfGivenKey() {
-        TrieNodeView a = trie.snapshot("", 10, 100, "Анна").children()[0];
-        assertTrue(a.visited());
-    }
-
-    @Test
-    void snapshotDoesNotHighlightOtherBranches() {
-        TrieNodeView i = trie.snapshot("", 10, 100, "Анна").children()[1];
-        assertFalse(i.visited());
-    }
-
-    @Test
-    void snapshotHighlightsExistingPartOfMissingKey() {
-        TrieNodeView root = trie.snapshot("", 10, 100, "Ивар");
-        TrieNodeView iva = root.children()[1].children()[0].children()[0];
-        assertEquals("ива", iva.prefix());
-        assertTrue(iva.visited());
-        assertFalse(iva.children()[0].visited());
-    }
-
-    @Test
-    void snapshotRespectsNodeLimit() {
-        TrieNodeView root = trie.snapshot("", 10, 3, null);
-        assertEquals(2, root.children().length);
-        assertTrue(root.children()[0].truncated());
+    void snapshotStopsAtNodeLimit() {
+        TrieNodeView root = trie.snapshot("", 3);
+        assertNull(root.children()[0].children()[0]);
     }
 
     @Test
     void snapshotOfUnknownPrefixIsNull() {
-        assertNull(trie.snapshot("я", 10, 100, null));
+        assertNull(trie.snapshot("я", 100));
     }
 }

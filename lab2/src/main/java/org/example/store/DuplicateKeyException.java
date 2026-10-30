@@ -1,14 +1,10 @@
 package org.example.store;
 
 public class DuplicateKeyException extends RuntimeException {
-    private final String key;
+
+    private static final long serialVersionUID = 1L;
 
     public DuplicateKeyException(String key) {
-        super("Запись с ключом '" + key + "' уже есть");
-        this.key = key;
-    }
-
-    public String getKey() {
-        return key;
+        super("Контакт с именем \"" + key + "\" уже есть");
     }
 }

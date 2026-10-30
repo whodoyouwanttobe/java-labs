@@ -31,10 +31,6 @@ public class Contact {
         return organization;
     }
 
-    public Contact withName(String newName) {
-        return new Contact(newName, phone, email, organization);
-    }
-
     public String getType() {
         return "Contact";
     }
@@ -56,12 +52,11 @@ public class Contact {
 
     @Override
     public int hashCode() {
-        return Objects.hash(getType(), name, phone, email, organization);
+        return Objects.hash(name, phone, email, organization);
     }
 
     @Override
     public String toString() {
-        return String.format("Contact{name='%s', phone='%s', email='%s', org='%s'}",
-                name, phone, email, organization);
+        return getType() + " " + name;
     }
 }
