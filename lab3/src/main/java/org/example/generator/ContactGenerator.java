@@ -2,11 +2,9 @@ package org.example.generator;
 
 import org.example.model.Contact;
 import org.example.model.CorporateContact;
-import org.example.store.EntityStore;
-import org.example.tasks.ProgressListener;
+import org.example.store.Store;
 
 import java.util.Random;
-import java.util.function.BooleanSupplier;
 
 public class ContactGenerator {
 
@@ -36,62 +34,47 @@ public class ContactGenerator {
             "Юрист", "Секретарь", "Тестировщик", "Администратор"
     };
     private static final String[] DOMAINS = {"mail.ru", "yandex.ru", "gmail.com", "corp.local"};
-
     private static final double CORPORATE_SHARE = 0.4;
-    private static final int PROGRESS_STEP = 500;
 
     private final Random random;
-    private int sequence;
+    private int counter;
 
     public ContactGenerator() {
-        this(new Random());
+        random = new Random();
     }
 
     public ContactGenerator(long seed) {
-        this(new Random(seed));
+        random = new Random(seed);
     }
 
-    private ContactGenerator(Random random) {
-        this.random = random;
-    }
-
-    public Contact next() {
-        sequence++;
-        String name = pick(LAST_NAMES) + " " + pick(FIRST_NAMES) + " " + pick(PATRONYMICS);
+    public Contact next(Store<Contact> store) {
+        counter++;
+        String name = uniqueName(store);
         String phone = "+79" + String.format("%09d", random.nextInt(1_000_000_000));
-        String email = "user" + sequence + "@" + pick(DOMAINS);
-        String org = pick(ORGANIZATIONS);
+        String email = "user" + counter + "@" + pick(DOMAINS);
+        String organization = pick(ORGANIZATIONS);
         if (random.nextDouble() < CORPORATE_SHARE) {
-            String internal = String.valueOf(100 + random.nextInt(900));
-            return new CorporateContact(name, phone, email, org, pick(POSITIONS), internal);
+            String internalNumber = String.valueOf(100 + random.nextInt(900));
+            return new CorporateContact(name, phone, email, organization, pick(POSITIONS), internalNumber);
         }
-        return new Contact(name, phone, email, org);
+        return new Contact(name, phone, email, organization);
     }
 
-    public int generateInto(EntityStore<String, Contact> store, int count,
-                            ProgressListener progress, BooleanSupplier cancelled) {
-        if (count < 0) {
-            throw new IllegalArgumentException("Количество не может быть отрицательным: " + count);
+    public void fill(Store<Contact> store, int count) {
+        for (int i = 0; i < count; i++) {
+            store.add(next(store));
         }
-        int added = 0;
-        while (added < count && !cancelled.getAsBoolean()) {
-            Contact contact = next();
-            String baseName = contact.getName();
-            int suffix = 2;
-            while (!store.tryAdd(contact)) {
-                contact = contact.withName(baseName + " " + suffix++);
-            }
-            added++;
-            if (added % PROGRESS_STEP == 0) {
-                progress.onProgress(added, count);
-            }
-        }
-        progress.onProgress(added, count);
-        return added;
     }
 
-    public int generateInto(EntityStore<String, Contact> store, int count) {
-        return generateInto(store, count, ProgressListener.NONE, () -> false);
+    private String uniqueName(Store<Contact> store) {
+        String base = pick(LAST_NAMES) + " " + pick(FIRST_NAMES) + " " + pick(PATRONYMICS);
+        String name = base;
+        int number = 2;
+        while (store.contains(name)) {
+            name = base + " " + number;
+            number++;
+        }
+        return name;
     }
 
     private String pick(String[] values) {

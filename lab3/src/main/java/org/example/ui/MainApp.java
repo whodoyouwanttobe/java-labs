@@ -1,471 +1,388 @@
 package org.example.ui;
 
 import javafx.application.Application;
-import javafx.beans.binding.Bindings;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.concurrent.Task;
 import javafx.geometry.Insets;
-import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
-import javafx.scene.control.ListCell;
-import javafx.scene.control.ListView;
 import javafx.scene.control.ProgressBar;
-import javafx.scene.control.Separator;
-import javafx.scene.control.Spinner;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextField;
-import javafx.scene.control.ToolBar;
 import javafx.scene.layout.BorderPane;
-import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
-import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
-import javafx.scene.paint.Color;
-import javafx.scene.shape.Circle;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import org.example.csv.CsvParseException;
 import org.example.csv.LoadResult;
+import org.example.io.SerializationException;
 import org.example.model.Contact;
 import org.example.model.Editable;
-import org.example.store.ContactStores;
+import org.example.store.ContactStore;
 import org.example.store.DuplicateKeyException;
 import org.example.store.KeyNotFoundException;
-import org.example.store.TrieStore;
-import org.example.tasks.GenerateContactsTask;
+import org.example.tasks.ExportTask;
+import org.example.tasks.GenerateTask;
+import org.example.tasks.ImportTask;
 import org.example.tasks.LoadCsvTask;
 import org.example.tasks.SaveCsvTask;
-import org.example.io.ContactFormat;
-import org.example.tasks.ExportTask;
-import org.example.tasks.ImportTask;
 
 import java.io.File;
-import java.util.List;
 
 public class MainApp extends Application {
 
-    private static final int SUGGESTION_LIMIT = 50;
-    private static final int MAX_VISIBLE_NODES = 200;
-    private static final int DEFAULT_DEPTH = 25;
-    private static final int MAX_DEPTH = 60;
+    private static final int MAX_TRIE_NODES = 300;
     private static final int MAX_GENERATE = 1_000_000;
-    private static final int MAX_ERRORS_SHOWN = 30;
-    private static final String DEFAULT_GENERATE = "1000";
+    private static final int MAX_ERRORS_SHOWN = 50;
 
-    private TrieStore<Contact> store = ContactStores.create();
+    private ContactStore store = new ContactStore();
     private final ObservableList<Contact> rows = FXCollections.observableArrayList();
-    private final ObservableList<Contact> suggestions = FXCollections.observableArrayList();
+    private String lastKey;
+    private Task<?> currentTask;
 
     private Stage stage;
-    private ContactTable table;
-    private TriePane triePane;
-    private BackgroundRunner runner;
-    private String lastKey;
-
-    private final TextField findField = new TextField();
+    private final ContactTable table = new ContactTable(rows);
+    private final TriePane triePane = new TriePane();
+    private final TextField searchField = new TextField();
     private final TextField prefixField = new TextField();
-    private final TextField generateField = new TextField(DEFAULT_GENERATE);
-    private final Spinner<Integer> depthSpinner = new Spinner<>(1, MAX_DEPTH, DEFAULT_DEPTH);
-    private final Label countLabel = new Label();
+    private final TextField countField = new TextField("1000");
+    private final Label foundLabel = new Label();
     private final Label sizeLabel = new Label();
     private final Label statusLabel = new Label("Готово");
     private final ProgressBar progressBar = new ProgressBar(0);
+    private final Button cancelButton = new Button("Отмена");
+    private final Button editButton = new Button("Изменить");
+    private final HBox buttonBar = new HBox(8);
+    private final HBox searchBar = new HBox(8);
 
     @Override
     public void start(Stage stage) {
         this.stage = stage;
-        runner = new BackgroundRunner(progressBar, statusLabel);
-        table = new ContactTable(rows);
-        triePane = new TriePane();
+        watchSelection();
+        createButtonBar();
+        createSearchBar();
 
-        SplitPane center = new SplitPane(buildLeft(), buildRight());
+        SplitPane center = new SplitPane(table, triePane);
         center.setDividerPositions(0.55);
 
-        BorderPane root = new BorderPane();
-        root.setTop(buildToolBar());
-        root.setCenter(center);
-        root.setBottom(buildStatusBar());
+        VBox top = new VBox(8, buttonBar, searchBar);
+        top.setPadding(new Insets(8));
 
+        BorderPane root = new BorderPane();
+        root.setTop(top);
+        root.setCenter(center);
+        root.setBottom(createStatusBar());
+
+        stage.setTitle("Справочник контактов");
+        stage.setScene(new Scene(root, 1200, 700));
+        stage.show();
+        refresh();
+    }
+
+    private void watchSelection() {
         table.getSelectionModel().selectedItemProperty().addListener((obs, oldValue, selected) -> {
+            editButton.setDisable(!(selected instanceof Editable));
             if (selected != null) {
                 lastKey = selected.getName();
-                redrawTrie();
+                drawTrie();
             }
         });
-        prefixField.textProperty().addListener((obs, oldValue, newValue) -> {
-            lastKey = newValue;
-            updateSuggestions();
-            redrawTrie();
-        });
-        depthSpinner.valueProperty().addListener((obs, oldValue, newValue) -> redrawTrie());
-
-        stage.setTitle("Справочник контактов — Trie");
-        stage.setScene(new Scene(root, 1300, 750));
-        stage.show();
-        refresh("Готово");
     }
 
-    @Override
-    public void stop() {
-        runner.shutdown();
+    private void createButtonBar() {
+        Button loadButton = new Button("Загрузить CSV");
+        loadButton.setOnAction(e -> loadCsv());
+        Button saveButton = new Button("Сохранить CSV");
+        saveButton.setOnAction(e -> saveCsv());
+        Button importButton = new Button("Импорт");
+        importButton.setOnAction(e -> importFile());
+        Button exportButton = new Button("Экспорт");
+        exportButton.setOnAction(e -> exportFile());
+        Button addButton = new Button("Добавить");
+        addButton.setOnAction(e -> addContact());
+        editButton.setOnAction(e -> editContact());
+        editButton.setDisable(true);
+        Button deleteButton = new Button("Удалить");
+        deleteButton.setOnAction(e -> deleteContact());
+        Button clearButton = new Button("Очистить");
+        clearButton.setOnAction(e -> clearAll());
+
+        buttonBar.getChildren().addAll(loadButton, saveButton, importButton, exportButton,
+                addButton, editButton, deleteButton, clearButton);
+        buttonBar.setAlignment(Pos.CENTER_LEFT);
     }
 
-    private ToolBar buildToolBar() {
-        Button load = new Button("Загрузить CSV");
-        load.setOnAction(e -> onLoad());
-        Button save = new Button("Сохранить CSV");
-        save.setOnAction(e -> onSave());
-        Button add = new Button("Добавить");
-        add.setOnAction(e -> onAdd());
-        Button edit = new Button("Изменить");
-        edit.setOnAction(e -> onEdit());
-        Button delete = new Button("Удалить");
-        delete.setOnAction(e -> onDelete());
-        Button generate = new Button("Сгенерировать");
-        generate.setOnAction(e -> onGenerate());
-        Button clear = new Button("Очистить");
-        Button export = new Button("Экспорт");
-        export.setOnAction(e -> onExport());
-        Button importBtn = new Button("Импорт");
-        importBtn.setOnAction(e -> onImport());
-        clear.setOnAction(e -> onClear());
+    private void createSearchBar() {
+        searchField.setPromptText("Полное имя");
+        searchField.setOnAction(e -> findContact());
+        Button findButton = new Button("Найти");
+        findButton.setOnAction(e -> findContact());
 
-        generateField.setPrefColumnCount(7);
+        prefixField.setPromptText("Начало имени");
+        prefixField.textProperty().addListener((obs, oldValue, newValue) -> refresh());
 
-        var busy = runner.busyProperty();
-        var selected = table.getSelectionModel().selectedItemProperty();
-        for (Button b : new Button[]{load, save, add, generate, clear, export, importBtn}) {
-            b.disableProperty().bind(busy);
-        }
-        edit.disableProperty().bind(busy.or(Bindings.createBooleanBinding(
-                () -> !(selected.get() instanceof Editable), selected)));
-        delete.disableProperty().bind(busy.or(selected.isNull()));
+        countField.setPrefColumnCount(7);
+        Button generateButton = new Button("Сгенерировать");
+        generateButton.setOnAction(e -> generate());
 
-        return new ToolBar(load, save,  export, importBtn, new Separator(Orientation.VERTICAL),
-                add, edit, delete, new Separator(Orientation.VERTICAL),
-                new Label("Кол-во:"), generateField, generate, clear);
+        searchBar.getChildren().addAll(new Label("Поиск:"), searchField, findButton,
+                new Label("Префикс:"), prefixField, foundLabel,
+                new Label("Количество:"), countField, generateButton);
+        searchBar.setAlignment(Pos.CENTER_LEFT);
     }
 
-    private VBox buildLeft() {
-        findField.setPromptText("Полное имя");
-        findField.setOnAction(e -> onFind());
-        Button find = new Button("Найти");
-        find.setOnAction(e -> onFind());
-        HBox.setHgrow(findField, Priority.ALWAYS);
+    private HBox createStatusBar() {
+        cancelButton.setDisable(true);
+        cancelButton.setOnAction(e -> currentTask.cancel());
+        progressBar.setPrefWidth(200);
 
-        HBox findRow = new HBox(8, new Label("Поиск:"), findField, find);
-        findRow.setAlignment(Pos.CENTER_LEFT);
-
-        VBox box = new VBox(8, findRow, table);
-        box.setPadding(new Insets(8));
-        VBox.setVgrow(table, Priority.ALWAYS);
-        return box;
+        HBox statusBar = new HBox(10, statusLabel, progressBar, cancelButton, sizeLabel);
+        statusBar.setAlignment(Pos.CENTER_LEFT);
+        statusBar.setPadding(new Insets(5, 8, 5, 8));
+        return statusBar;
     }
 
-    private VBox buildRight() {
-        prefixField.setPromptText("например: ив");
-        HBox.setHgrow(prefixField, Priority.ALWAYS);
-        depthSpinner.setPrefWidth(75);
-        depthSpinner.setEditable(true);
-
-        HBox prefixRow = new HBox(8, new Label("Префикс:"), prefixField,
-                new Label("Глубина:"), depthSpinner);
-        prefixRow.setAlignment(Pos.CENTER_LEFT);
-
-        ListView<Contact> suggestionList = new ListView<>(suggestions);
-        suggestionList.setPrefHeight(140);
-        suggestionList.setMinHeight(110);
-        suggestionList.setPlaceholder(new Label("Нет совпадений"));
-        suggestionList.setCellFactory(list -> new ListCell<>() {
-            @Override
-            protected void updateItem(Contact item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : item.getName() + "  [" + item.getType() + "]");
-            }
-        });
-        suggestionList.getSelectionModel().selectedItemProperty().addListener((obs, oldValue, picked) -> {
-            if (picked != null) {
-                table.selectAndShow(picked);
-            }
-        });
-
-        VBox box = new VBox(8, prefixRow, countLabel, suggestionList, triePane, buildLegend());
-        box.setPadding(new Insets(8));
-        VBox.setVgrow(triePane, Priority.ALWAYS);
-        return box;
-    }
-
-    private FlowPane buildLegend() {
-        FlowPane legend = new FlowPane(14, 4,
-                legendItem(Color.WHITE, Color.web("#546e7a"), "узел"),
-                legendItem(Color.web("#a5d6a7"), Color.web("#546e7a"), "есть контакт"),
-                legendItem(Color.web("#ffe0b2"), Color.web("#ef6c00"), "путь последней операции"),
-                new Label("число — контактов в поддереве"),
-                new Label("… — ветка не показана"));
-        legend.setAlignment(Pos.CENTER_LEFT);
-        return legend;
-    }
-
-    private HBox legendItem(Color fill, Color stroke, String text) {
-        Circle circle = new Circle(6, fill);
-        circle.setStroke(stroke);
-        circle.setStrokeWidth(2);
-        HBox item = new HBox(4, circle, new Label(text));
-        item.setAlignment(Pos.CENTER_LEFT);
-        return item;
-    }
-
-    private HBox buildStatusBar() {
-        Button cancel = new Button("Отмена");
-        cancel.setOnAction(e -> runner.cancel());
-        cancel.disableProperty().bind(runner.busyProperty().not());
-        progressBar.setPrefWidth(220);
-        progressBar.visibleProperty().bind(runner.busyProperty());
-
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-
-        HBox bar = new HBox(10, statusLabel, spacer, sizeLabel, progressBar, cancel);
-        bar.setAlignment(Pos.CENTER_LEFT);
-        bar.setPadding(new Insets(4, 8, 4, 8));
-        return bar;
-    }
-
-    private void onLoad() {
-        FileChooser chooser = csvChooser("Открыть CSV");
-        File file = chooser.showOpenDialog(stage);
+    private void loadCsv() {
+        File file = csvChooser().showOpenDialog(stage);
         if (file == null) {
             return;
         }
-        TrieStore<Contact> loaded = ContactStores.create();
-        runner.run(new LoadCsvTask(file.toPath(), loaded), result -> {
-            store = loaded;
+        ContactStore newStore = new ContactStore();
+        LoadCsvTask task = new LoadCsvTask(file.toPath(), newStore);
+        runTask(task, () -> {
+            store = newStore;
             lastKey = null;
-            refresh("Загружено " + result.getLoaded() + " из " + file.getName());
+            refresh();
+            LoadResult result = task.getValue();
+            statusLabel.setText("Загружено контактов: " + result.getLoaded());
             if (result.hasErrors()) {
                 showLoadErrors(result);
-            } else if (result.getLoaded() == 0) {
-                Alerts.info("В файле нет контактов.");
             }
-        }, () -> statusLabel.setText("Загрузка отменена, данные не изменились"));
-    }
-
-    private void onImport() {
-        FileChooser chooser = formatChooser("Импорт справочника");
-        File chosen = chooser.showOpenDialog(stage);
-        ContactFormat format;
-        if (chosen  == null) {
-            return;
-        }
-        try
-            {
-                format = ContactFormat.of(chosen.toPath());
-            }
-        catch (IllegalArgumentException e)
-            {
-                Alerts.error(e.getMessage());
-                return;
-            }
-        TrieStore<Contact> loaded = ContactStores.create();
-        runner.run(new ImportTask(chosen.toPath(), loaded, format), result -> {
-            store = loaded;
-            lastKey = null;
-            refresh("Импортировано " + result + " из " + chosen.getName());
-            }, () -> statusLabel.setText("Импорт отменён, данные не изменились"));
+        });
     }
 
     private void showLoadErrors(LoadResult result) {
-        List<CsvParseException> errors = result.getErrors();
-        StringBuilder details = new StringBuilder();
-        for (int i = 0; i < errors.size() && i < MAX_ERRORS_SHOWN; i++) {
-            CsvParseException e = errors.get(i);
-            details.append("Строка ").append(e.getLineNumber()).append(": ")
-                   .append(e.getMessage()).append(" [").append(e.getErrorCode()).append("]\n");
+        StringBuilder text = new StringBuilder();
+        int shown = 0;
+        for (CsvParseException error : result.getErrors()) {
+            if (shown == MAX_ERRORS_SHOWN) {
+                text.append("...");
+                break;
+            }
+            text.append("Строка ").append(error.getLineNumber()).append(": ")
+                    .append(error.getMessage()).append(" [").append(error.getErrorCode()).append("]\n");
+            shown++;
         }
-        if (errors.size() > MAX_ERRORS_SHOWN) {
-            details.append("... и ещё ").append(errors.size() - MAX_ERRORS_SHOWN);
-        }
-        Alerts.warningWithDetails("Часть строк пропущена",
-                "Загружено: " + result.getLoaded() + ", пропущено: " + errors.size(),
-                details.toString());
+        Alerts.warning("Пропущено строк: " + result.getErrors().size(), text.toString());
     }
 
-    private void onSave() {
+    private void saveCsv() {
         if (store.size() == 0) {
-            Alerts.error("Нечего сохранять — справочник пуст.");
+            Alerts.error("Справочник пуст, нечего сохранять");
             return;
         }
-        FileChooser chooser = csvChooser("Сохранить CSV");
+        FileChooser chooser = csvChooser();
         chooser.setInitialFileName("contacts.csv");
         File file = chooser.showSaveDialog(stage);
         if (file == null) {
             return;
         }
-        runner.run(new SaveCsvTask(file.toPath(), store),
-                saved -> statusLabel.setText("Сохранено " + saved + " в " + file.getName()),
-                () -> statusLabel.setText("Сохранение отменено"));
-    }
-    private void onExport() {
-        if (store.size() == 0) {
-            Alerts.error("Нечего сохранять — справочник пуст.");
-            return;
-        }
-        FileChooser chooser = formatChooser("Экспорт справочника");
-        chooser.setInitialFileName("contacts");
-        File chosen = chooser.showSaveDialog(stage);
-        if (chosen == null) {
-            return;
-        }
-        ContactFormat format = selectedFormat(chooser);
-        File file = withExtension(chosen, format);
-        runner.run(new ExportTask(file.toPath(), store, format),
-                saved -> statusLabel.setText("Экспортировано " + saved + " в " + file.getName()),
-                () -> statusLabel.setText("Экспорт отменён"));
+        runTask(new SaveCsvTask(file.toPath(), store.toArray()),
+                () -> statusLabel.setText("Сохранено в " + file.getName()));
     }
 
-    private void onAdd() {
-        new ContactDialog(null).showAndWait().ifPresent(contact -> {
-            try {
-                store.add(contact);
-            } catch (DuplicateKeyException e) {
-                Alerts.error("Контакт с именем «" + e.getKey() + "» уже есть.");
-                return;
-            }
-            lastKey = contact.getName();
-            refresh("Добавлен: " + contact.getName());
-            table.selectAndShow(contact);
-        });
-    }
-
-    private void onEdit() {
-        Contact selected = table.getSelectionModel().getSelectedItem();
-        if (!(selected instanceof Editable)) {
-            return;
-        }
-        new ContactDialog(selected).showAndWait().ifPresent(updated -> {
-            try {
-                store.update(selected.getName(), updated);
-            } catch (DuplicateKeyException e) {
-                Alerts.error("Контакт с именем «" + e.getKey() + "» уже есть.");
-                return;
-            } catch (KeyNotFoundException e) {
-                Alerts.error("Контакт «" + e.getKey() + "» уже удалён.");
-                refresh("Таблица обновлена");
-                return;
-            }
-            lastKey = updated.getName();
-            refresh("Изменён: " + updated.getName());
-            table.selectAndShow(updated);
-        });
-    }
-
-    private void onDelete() {
-        Contact selected = table.getSelectionModel().getSelectedItem();
-        if (selected == null || !Alerts.confirm("Удалить «" + selected.getName() + "»?")) {
-            return;
-        }
-        store.removeByKey(selected.getName());
-        lastKey = selected.getName();
-        refresh("Удалён: " + selected.getName());
-    }
-
-    private void onFind() {
-        String name = findField.getText().trim();
-        if (name.isEmpty()) {
-            return;
-        }
-        lastKey = name;
-        Contact found = store.findByKey(name);
-        if (found == null) {
-            redrawTrie();
-            statusLabel.setText("Не найден: " + name);
-            return;
-        }
-        statusLabel.setText("Найден: " + found.getName());
-        table.selectAndShow(found);
-        redrawTrie();
-    }
-
-    private void onGenerate() {
-        int count;
-        try {
-            count = Integer.parseInt(generateField.getText().trim());
-        } catch (NumberFormatException e) {
-            Alerts.error("Количество должно быть целым числом.");
-            return;
-        }
-        if (count < 1 || count > MAX_GENERATE) {
-            Alerts.error("Количество должно быть от 1 до " + MAX_GENERATE + ".");
-            return;
-        }
-        runner.run(new GenerateContactsTask(store, count),
-                result -> refresh(result.stopped()
-                        ? "Генерация остановлена, добавлено " + result.added() + " из " + result.requested()
-                        : "Сгенерировано " + result.added()),
-                () -> refresh("Генерация отменена"));
-    }
-
-    private void onClear() {
-        if (store.size() > 0 && Alerts.confirm("Удалить все контакты?")) {
-            store.clear();
-            lastKey = null;
-            refresh("Справочник очищен");
-        }
-    }
-
-    private void refresh(String status) {
-        redrawTrie();
-        rows.setAll(store.toArray());
-        updateSuggestions();
-        sizeLabel.setText("Контактов: " + store.size() + ", узлов: " + store.nodeCount());
-        statusLabel.setText(status);
-    }
-
-    private void updateSuggestions() {
-        String prefix = prefixField.getText();
-        suggestions.setAll(store.findByPrefix(prefix, SUGGESTION_LIMIT));
-        countLabel.setText("Контактов в поддереве: " + store.countByPrefix(prefix));
-    }
-
-    private void redrawTrie() {
-        String prefix = prefixField.getText().trim();
-        triePane.show(store.snapshot(prefix, depthSpinner.getValue(), MAX_VISIBLE_NODES, lastKey), prefix);
-    }
-
-    private static FileChooser csvChooser(String title)
-    {
+    private FileChooser csvChooser() {
         FileChooser chooser = new FileChooser();
-        chooser.setTitle(title);
         chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("CSV", "*.csv"));
         return chooser;
     }
 
-    private static FileChooser formatChooser(String title){
-        FileChooser fchooser = new FileChooser();
-        fchooser.setTitle(title);
-        for (ContactFormat f : ContactFormat.values()) {
-            fchooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(f.title(), f.pattern()));
+    private void importFile() {
+        File file = formatChooser().showOpenDialog(stage);
+        if (file == null) {
+            return;
         }
-        return fchooser;
+        ContactStore newStore = new ContactStore();
+        ImportTask task = new ImportTask(file.toPath(), newStore);
+        runTask(task, () -> {
+            store = newStore;
+            lastKey = null;
+            refresh();
+            statusLabel.setText("Импортировано контактов: " + task.getValue());
+        });
     }
 
-    private static ContactFormat selectedFormat(FileChooser chooser) {
-        if (chooser.getSelectedExtensionFilter() == null) {
-            return ContactFormat.values()[0] ;
+    private void exportFile() {
+        if (store.size() == 0) {
+            Alerts.error("Справочник пуст, нечего сохранять");
+            return;
         }
-        int i = chooser.getExtensionFilters().indexOf(chooser.getSelectedExtensionFilter());
-        return ContactFormat.values()[i];
+        FileChooser chooser = formatChooser();
+        chooser.setInitialFileName("contacts.json");
+        File file = chooser.showSaveDialog(stage);
+        if (file == null) {
+            return;
+        }
+        runTask(new ExportTask(file.toPath(), store.toArray()),
+                () -> statusLabel.setText("Экспортировано в " + file.getName()));
     }
 
-    private static File withExtension(File file, ContactFormat format) {
-        String name = file.getName().toLowerCase();
-        if (!name.endsWith("." + format.extension())) {
-            return new File(file.getPath() + "." + format.extension());
+    private FileChooser formatChooser() {
+        FileChooser chooser = new FileChooser();
+        chooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter("JSON", "*.json"),
+                new FileChooser.ExtensionFilter("Бинарный файл", "*.ctb"));
+        return chooser;
+    }
+
+    private void addContact() {
+        new ContactDialog(null).showAndWait().ifPresent(contact -> {
+            try {
+                store.add(contact);
+                lastKey = contact.getName();
+                refresh();
+                table.getSelectionModel().select(contact);
+                statusLabel.setText("Добавлен " + contact.getName());
+            } catch (DuplicateKeyException e) {
+                Alerts.error(e.getMessage());
+            }
+        });
+    }
+
+    private void editContact() {
+        Contact selected = table.getSelectionModel().getSelectedItem();
+        if (!(selected instanceof Editable)) {
+            return;
         }
-        return file;
+        new ContactDialog(selected).showAndWait().ifPresent(changed -> {
+            try {
+                store.update(selected.getName(), changed);
+                lastKey = changed.getName();
+                refresh();
+                table.getSelectionModel().select(changed);
+                statusLabel.setText("Изменён " + changed.getName());
+            } catch (DuplicateKeyException | KeyNotFoundException e) {
+                Alerts.error(e.getMessage());
+            }
+        });
+    }
+
+    private void deleteContact() {
+        Contact selected = table.getSelectionModel().getSelectedItem();
+        if (selected == null || !Alerts.confirm("Удалить " + selected.getName() + "?")) {
+            return;
+        }
+        store.remove(selected.getName());
+        lastKey = selected.getName();
+        refresh();
+        statusLabel.setText("Удалён " + selected.getName());
+    }
+
+    private void clearAll() {
+        if (store.size() > 0 && Alerts.confirm("Удалить все контакты?")) {
+            store.clear();
+            lastKey = null;
+            refresh();
+            statusLabel.setText("Справочник очищен");
+        }
+    }
+
+    private void findContact() {
+        String name = searchField.getText().trim();
+        if (name.isEmpty()) {
+            return;
+        }
+        lastKey = name;
+        Contact found = store.find(name);
+        if (found == null) {
+            statusLabel.setText("Не найден: " + name);
+            drawTrie();
+            return;
+        }
+        prefixField.clear();
+        table.getSelectionModel().select(found);
+        table.scrollTo(found);
+        statusLabel.setText("Найден: " + found.getName());
+        drawTrie();
+    }
+
+    private void generate() {
+        int count;
+        try {
+            count = Integer.parseInt(countField.getText().trim());
+        } catch (NumberFormatException e) {
+            Alerts.error("Количество должно быть целым числом");
+            return;
+        }
+        if (count < 1 || count > MAX_GENERATE) {
+            Alerts.error("Количество должно быть от 1 до " + MAX_GENERATE);
+            return;
+        }
+        GenerateTask task = new GenerateTask(store, count);
+        runTask(task, () -> {
+            refresh();
+            statusLabel.setText("Сгенерировано контактов: " + task.getValue());
+        });
+    }
+
+    private void runTask(Task<?> task, Runnable onSuccess) {
+        currentTask = task;
+        setBusy(true);
+        progressBar.progressProperty().bind(task.progressProperty());
+        statusLabel.textProperty().bind(task.messageProperty());
+
+        task.setOnSucceeded(e -> {
+            finishTask();
+            onSuccess.run();
+        });
+        task.setOnCancelled(e -> {
+            finishTask();
+            refresh();
+            statusLabel.setText("Операция отменена");
+        });
+        task.setOnFailed(e -> {
+            finishTask();
+            statusLabel.setText("Ошибка");
+            Throwable error = task.getException();
+            if (error instanceof SerializationException serializationError) {
+                Alerts.error("Файл не прочитан [" + serializationError.getError() + "]\n" + error.getMessage());
+            } else {
+                Alerts.error(error.getMessage());
+            }
+        });
+
+        Thread thread = new Thread(task);
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private void finishTask() {
+        progressBar.progressProperty().unbind();
+        statusLabel.textProperty().unbind();
+        progressBar.setProgress(0);
+        setBusy(false);
+    }
+
+    private void setBusy(boolean busy) {
+        buttonBar.setDisable(busy);
+        searchBar.setDisable(busy);
+        cancelButton.setDisable(!busy);
+    }
+
+    private void refresh() {
+        String prefix = prefixField.getText();
+        rows.setAll(store.findByPrefix(prefix, store.size()));
+        foundLabel.setText("Найдено: " + store.countByPrefix(prefix));
+        sizeLabel.setText("Всего контактов: " + store.size() + ", узлов в дереве: " + store.nodeCount());
+        drawTrie();
+    }
+
+    private void drawTrie() {
+        String prefix = prefixField.getText();
+        triePane.draw(store.snapshot(prefix, MAX_TRIE_NODES), prefix, lastKey);
     }
 }

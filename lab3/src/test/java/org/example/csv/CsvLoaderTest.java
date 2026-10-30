@@ -1,9 +1,8 @@
 package org.example.csv;
 
-import org.example.generator.ContactGenerator;
 import org.example.model.Contact;
-import org.example.store.ContactStores;
-import org.example.store.TrieStore;
+import org.example.model.CorporateContact;
+import org.example.store.ContactStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -13,7 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class CsvLoaderTest {
 
@@ -21,64 +20,53 @@ class CsvLoaderTest {
     Path dir;
 
     @Test
-    void duplicateNameIsReportedAndSkipped() throws IOException {
-        Path file = dir.resolve("c.csv");
-        Files.writeString(file, CsvSaver.HEADER + "\n"
-                + "Contact;Иван;+7;;НГТУ\n"
-                + "Contact;иван;+8;;НГТУ\n", StandardCharsets.UTF_8);
-        TrieStore<Contact> store = ContactStores.create();
+    void savedContactsAreLoadedBack() throws IOException {
+        Contact[] contacts = {
+                new Contact("Анна", "+7", "a@mail.ru", "НГТУ"),
+                new CorporateContact("Борис; мл.", "+8", "b@mail.ru", "ООО \"Рога\"", "Инженер", "12")
+        };
+        Path file = dir.resolve("contacts.csv");
+        new CsvSaver().save(file, contacts);
 
+        ContactStore store = new ContactStore();
         LoadResult result = new CsvLoader().load(file, store);
 
+        assertFalse(result.hasErrors());
+        assertEquals(contacts[1], store.find("Борис; мл."));
+    }
+
+    @Test
+    void duplicateNameIsSkipped() throws IOException {
+        Path file = write("Contact;Иван;+7;;НГТУ", "Contact;иван;+8;;НГТУ");
+        LoadResult result = new CsvLoader().load(file, new ContactStore());
         assertEquals(CsvErrorCode.DUPLICATE_NAME, result.getErrors().get(0).getErrorCode());
     }
 
     @Test
-    void saveThenLoadKeepsAllContacts() throws IOException {
-        TrieStore<Contact> store = ContactStores.create();
-        store.add(new Contact("Анна", "+7", "a@mail.ru", "НГТУ"));
-        store.add(new Contact("Борис", "+8", "b@mail.ru", "НГТУ"));
-        Path file = dir.resolve("out.csv");
-        new CsvSaver().save(file, store);
-
-        TrieStore<Contact> loaded = ContactStores.create();
-        new CsvLoader().load(file, loaded);
-
-        assertEquals(2, loaded.size());
+    void unknownTypeIsSkipped() throws IOException {
+        Path file = write("Friend;Иван;+7;;НГТУ");
+        LoadResult result = new CsvLoader().load(file, new ContactStore());
+        assertEquals(CsvErrorCode.UNKNOWN_TYPE, result.getErrors().get(0).getErrorCode());
     }
 
     @Test
-    void progressIsReportedInBytesUpToFileSize() throws IOException {
-        TrieStore<Contact> store = ContactStores.create();
-        new ContactGenerator(3).generateInto(store, 3000);
-        Path file = dir.resolve("big.csv");
-        new CsvSaver().save(file, store);
-        long size = Files.size(file);
-        long[] last = new long[2];
-        boolean[] monotonic = {true};
-
-        new CsvLoader().load(file, ContactStores.create(), (done, total) -> {
-            monotonic[0] &= done >= last[0];
-            last[0] = done;
-            last[1] = total;
-        }, () -> false);
-
-        assertTrue(monotonic[0]);
-        assertEquals(size, last[0]);
-        assertEquals(size, last[1]);
+    void lettersInInternalNumberAreError() throws IOException {
+        Path file = write("Corporate;Иван;+7;;НГТУ;Инженер;12a");
+        LoadResult result = new CsvLoader().load(file, new ContactStore());
+        assertEquals(CsvErrorCode.BAD_NUMBER, result.getErrors().get(0).getErrorCode());
     }
 
     @Test
-    void cancelledLoadReportsCancelled() throws IOException {
-        TrieStore<Contact> store = ContactStores.create();
-        new ContactGenerator(4).generateInto(store, 100);
-        Path file = dir.resolve("c100.csv");
-        new CsvSaver().save(file, store);
-        TrieStore<Contact> target = ContactStores.create();
+    void progressEndsWithFileSize() throws IOException {
+        Path file = write("Contact;Иван;+7;;НГТУ");
+        long[] last = new long[1];
+        new CsvLoader().load(file, new ContactStore(), (done, total) -> last[0] = done);
+        assertEquals(Files.size(file), last[0]);
+    }
 
-        LoadResult result = new CsvLoader().load(file, target, (d, t) -> { }, () -> target.size() >= 20);
-
-        assertTrue(result.isCancelled());
-        assertEquals(20, result.getLoaded());
+    private Path write(String... lines) throws IOException {
+        Path file = dir.resolve("test.csv");
+        Files.writeString(file, CsvSaver.HEADER + "\n" + String.join("\n", lines) + "\n", StandardCharsets.UTF_8);
+        return file;
     }
 }

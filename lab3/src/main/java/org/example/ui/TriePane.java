@@ -1,162 +1,117 @@
 package org.example.ui;
 
-import javafx.geometry.VPos;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.paint.Color;
-import javafx.scene.text.Font;
-import javafx.scene.text.TextAlignment;
 import org.example.store.TrieNodeView;
 
-class TriePane extends ScrollPane {
+import java.util.Locale;
 
-    private static final double COLUMN_WIDTH = 34;
-    private static final double ROW_HEIGHT = 34;
-    private static final double RADIUS = 11;
-    private static final double MARGIN = 40;
+public class TriePane extends ScrollPane {
+
+    private static final double STEP_X = 30;
+    private static final double STEP_Y = 26;
+    private static final double RADIUS = 10;
+    private static final double MARGIN = 20;
     private static final double MIN_WIDTH = 400;
     private static final double MIN_HEIGHT = 300;
 
-    private static final Color BACKGROUND = Color.WHITE;
-    private static final Color EDGE = Color.web("#b0bec5");
-    private static final Color NODE_FILL = Color.WHITE;
-    private static final Color NODE_STROKE = Color.web("#546e7a");
-    private static final Color TERMINAL_FILL = Color.web("#a5d6a7");
-    private static final Color VISITED = Color.web("#ef6c00");
-    private static final Color VISITED_FILL = Color.web("#ffe0b2");
-    private static final Color TEXT = Color.web("#263238");
-    private static final Color HINT = Color.web("#90a4ae");
-
-    private static final Font LETTER_FONT = Font.font("Monospaced", 13);
-    private static final Font SMALL_FONT = Font.font("System", 10);
-
     private final Canvas canvas = new Canvas(MIN_WIDTH, MIN_HEIGHT);
-    private int rows;
-    private int maxDepth;
+    private int row;
 
-    private static final class Placed {
-        final TrieNodeView view;
-        final Placed[] children;
-        double x;
-        double y;
-
-        Placed(TrieNodeView view) {
-            this.view = view;
-            this.children = new Placed[view.children().length];
-        }
-    }
-
-    TriePane() {
+    public TriePane() {
         setContent(canvas);
         setPannable(true);
     }
 
-    void show(TrieNodeView root, String prefix) {
+    public void draw(TrieNodeView root, String prefix, String highlightKey) {
+        GraphicsContext g = canvas.getGraphicsContext2D();
+        g.clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
         if (root == null) {
-            resizeCanvas(MIN_WIDTH, MIN_HEIGHT);
-            message("Нет ни одного имени с префиксом «" + prefix + "»");
+            g.setFill(Color.BLACK);
+            g.fillText("Нет имён, начинающихся на \"" + prefix + "\"", MARGIN, MARGIN);
             return;
         }
-        rows = 0;
-        maxDepth = 0;
-        Placed tree = place(root, 0);
-        resizeCanvas(MARGIN * 2 + maxDepth * COLUMN_WIDTH + 80, MARGIN * 2 + Math.max(rows - 1, 0) * ROW_HEIGHT + 20);
+        canvas.setWidth(Math.max(MIN_WIDTH, MARGIN * 2 + depth(root) * STEP_X + 40));
+        canvas.setHeight(Math.max(MIN_HEIGHT, MARGIN * 2 + leaves(root) * STEP_Y));
+        g.clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
 
-        GraphicsContext g = canvas.getGraphicsContext2D();
-        g.setFill(BACKGROUND);
-        g.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
-        drawEdges(g, tree);
-        drawNodes(g, tree, true);
-        scrollToRoot(tree);
+        String key = highlightKey == null ? "" : highlightKey.trim().toLowerCase(Locale.ROOT);
+        row = 0;
+        drawNode(g, root, 0, prefix.trim().toLowerCase(Locale.ROOT), key);
     }
 
-    private void scrollToRoot(Placed root) {
-        setHvalue(0);
-        double viewport = getViewportBounds().getHeight();
-        double extra = canvas.getHeight() - viewport;
-        double value = extra <= 0 ? 0 : (root.y - viewport / 2) / extra;
-        setVvalue(Math.max(0, Math.min(1, value)));
-    }
-
-    private Placed place(TrieNodeView view, int depth) {
-        Placed p = new Placed(view);
-        p.x = MARGIN + depth * COLUMN_WIDTH;
-        maxDepth = Math.max(maxDepth, depth);
-        TrieNodeView[] kids = view.children();
-        if (kids.length == 0) {
-            p.y = MARGIN + rows * ROW_HEIGHT;
-            rows++;
-            return p;
-        }
-        for (int i = 0; i < kids.length; i++) {
-            p.children[i] = place(kids[i], depth + 1);
-        }
-        p.y = (p.children[0].y + p.children[kids.length - 1].y) / 2;
-        return p;
-    }
-
-    private void drawEdges(GraphicsContext g, Placed p) {
-        for (Placed child : p.children) {
-            boolean onPath = p.view.visited() && child.view.visited();
-            g.setStroke(onPath ? VISITED : EDGE);
-            g.setLineWidth(onPath ? 2.5 : 1);
-            g.strokeLine(p.x, p.y, child.x, child.y);
-            drawEdges(g, child);
-        }
-    }
-
-    private void drawNodes(GraphicsContext g, Placed p, boolean isRoot) {
-        TrieNodeView v = p.view;
-        Color fill = v.terminal() ? TERMINAL_FILL : (v.visited() ? VISITED_FILL : NODE_FILL);
-        g.setFill(fill);
-        g.fillOval(p.x - RADIUS, p.y - RADIUS, RADIUS * 2, RADIUS * 2);
-        g.setStroke(v.visited() ? VISITED : NODE_STROKE);
-        g.setLineWidth(v.visited() ? 3 : 1);
-        g.strokeOval(p.x - RADIUS, p.y - RADIUS, RADIUS * 2, RADIUS * 2);
-
-        g.setFill(TEXT);
-        g.setFont(LETTER_FONT);
-        g.setTextAlign(TextAlignment.CENTER);
-        g.setTextBaseline(VPos.CENTER);
-        g.fillText(isRoot ? "•" : letter(v.symbol()), p.x, p.y);
-
-        g.setFont(SMALL_FONT);
-        g.setFill(HINT);
-        if (isRoot) {
-            g.setTextAlign(TextAlignment.LEFT);
-            g.fillText(v.isRoot() ? "root (" + v.subtreeSize() + ")" : "«" + v.prefix() + "» (" + v.subtreeSize() + ")",
-                    p.x - RADIUS, p.y + RADIUS + 10);
-        } else if (p.children.length != 1) {
-            g.fillText(String.valueOf(v.subtreeSize()), p.x, p.y - RADIUS - 6);
-        }
-        if (v.truncated()) {
-            g.setTextAlign(TextAlignment.LEFT);
-            g.fillText("…", p.x + RADIUS + 3, p.y);
+    private double drawNode(GraphicsContext g, TrieNodeView node, int depth, String path, String key) {
+        double x = MARGIN + depth * STEP_X;
+        TrieNodeView[] children = node.children();
+        int shown = shownChildren(node);
+        double[] childY = new double[shown];
+        for (int i = 0; i < shown; i++) {
+            childY[i] = drawNode(g, children[i], depth + 1, path + children[i].symbol(), key);
         }
 
-        for (Placed child : p.children) {
-            drawNodes(g, child, false);
+        double y;
+        if (shown == 0) {
+            y = MARGIN + row * STEP_Y;
+            row++;
+        } else {
+            y = (childY[0] + childY[shown - 1]) / 2;
         }
+
+        for (int i = 0; i < shown; i++) {
+            boolean onPath = isOnPath(key, path + children[i].symbol());
+            g.setStroke(onPath ? Color.RED : Color.GRAY);
+            g.strokeLine(x + RADIUS, y, x + STEP_X - RADIUS, childY[i]);
+        }
+
+        g.setFill(node.hasValue() ? Color.LIGHTGREEN : Color.WHITE);
+        g.fillOval(x - RADIUS, y - RADIUS, RADIUS * 2, RADIUS * 2);
+        g.setStroke(isOnPath(key, path) ? Color.RED : Color.BLACK);
+        g.strokeOval(x - RADIUS, y - RADIUS, RADIUS * 2, RADIUS * 2);
+
+        g.setFill(Color.BLACK);
+        if (depth == 0) {
+            String title = path.isEmpty() ? "корень" : path;
+            g.fillText(title + " (" + node.count() + ")", x - RADIUS, y + RADIUS + 12);
+        } else {
+            g.fillText(String.valueOf(node.symbol()), x - 4, y + 4);
+        }
+        if (shown < children.length) {
+            g.fillText("...", x + RADIUS + 3, y + 4);
+        }
+        return y;
     }
 
-    private void message(String text) {
-        GraphicsContext g = canvas.getGraphicsContext2D();
-        g.setFill(BACKGROUND);
-        g.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
-        g.setFill(HINT);
-        g.setFont(Font.font("System", 14));
-        g.setTextAlign(TextAlignment.LEFT);
-        g.setTextBaseline(VPos.TOP);
-        g.fillText(text, 20, 20);
+    private int shownChildren(TrieNodeView node) {
+        int shown = 0;
+        while (shown < node.children().length && node.children()[shown] != null) {
+            shown++;
+        }
+        return shown;
     }
 
-    private void resizeCanvas(double width, double height) {
-        canvas.setWidth(Math.max(MIN_WIDTH, width));
-        canvas.setHeight(Math.max(MIN_HEIGHT, height));
+    private boolean isOnPath(String key, String path) {
+        return !key.isEmpty() && key.startsWith(path);
     }
 
-    private static String letter(char c) {
-        return c == ' ' ? "␣" : String.valueOf(c);
+    private int depth(TrieNodeView node) {
+        int max = 0;
+        for (int i = 0; i < shownChildren(node); i++) {
+            max = Math.max(max, depth(node.children()[i]) + 1);
+        }
+        return max;
+    }
+
+    private int leaves(TrieNodeView node) {
+        int shown = shownChildren(node);
+        if (shown == 0) {
+            return 1;
+        }
+        int sum = 0;
+        for (int i = 0; i < shown; i++) {
+            sum += leaves(node.children()[i]);
+        }
+        return sum;
     }
 }

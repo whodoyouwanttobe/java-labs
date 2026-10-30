@@ -2,13 +2,11 @@ package org.example.io;
 
 public enum SerializationError {
     EMPTY_FILE,
-    MALFORMED,
+    BAD_FORMAT,
+    BAD_VERSION,
     MISSING_FIELD,
-    INVALID_VALUE,
+    BAD_VALUE,
     UNKNOWN_TYPE,
-    DUPLICATE_KEY,
-    BAD_MAGIC,
-    UNSUPPORTED_VERSION,
-    TRUNCATED,
-    CORRUPTED
+    DUPLICATE_NAME,
+    TRUNCATED
 }

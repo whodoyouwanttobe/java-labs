@@ -2,9 +2,7 @@ package org.example.ui;
 
 import javafx.event.ActionEvent;
 import javafx.geometry.Insets;
-import javafx.scene.Node;
 import javafx.scene.control.Button;
-import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Dialog;
@@ -17,114 +15,95 @@ import org.example.model.Editable;
 
 import java.util.List;
 
-class ContactDialog extends Dialog<Contact> {
+public class ContactDialog extends Dialog<Contact> {
 
-    private static final String TYPE_CONTACT = "Контакт";
-    private static final String TYPE_CORPORATE = "Корпоративный контакт";
+    private static final String SIMPLE = "Контакт";
+    private static final String CORPORATE = "Корпоративный";
 
     private final ComboBox<String> typeBox = new ComboBox<>();
-    private final TextField nameField = field("Имя");
-    private final TextField phoneField = field("Телефон");
-    private final TextField emailField = field("E-mail");
-    private final TextField orgField = field("Организация");
-    private final TextField positionField = field("Должность");
-    private final TextField internalField = field("Внутренний номер");
-    private final Label positionLabel = new Label("Должность:");
-    private final Label internalLabel = new Label("Внутр. номер:");
+    private final TextField nameField = new TextField();
+    private final TextField phoneField = new TextField();
+    private final TextField emailField = new TextField();
+    private final TextField organizationField = new TextField();
+    private final TextField positionField = new TextField();
+    private final TextField internalField = new TextField();
 
-    ContactDialog(Contact existing) {
-        setTitle(existing == null ? "Новый контакт" : "Изменение контакта");
-        setHeaderText(existing == null ? "Заполните поля" : existing.getName());
+    public ContactDialog(Contact contact) {
+        setTitle(contact == null ? "Новый контакт" : "Изменение контакта");
+        getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
 
-        ButtonType saveType = new ButtonType("Сохранить", ButtonBar.ButtonData.OK_DONE);
-        ButtonType cancelType = new ButtonType("Отмена", ButtonBar.ButtonData.CANCEL_CLOSE);
-        getDialogPane().getButtonTypes().addAll(saveType, cancelType);
-
-        typeBox.getItems().addAll(TYPE_CONTACT, TYPE_CORPORATE);
-        typeBox.setValue(TYPE_CONTACT);
-        typeBox.valueProperty().addListener((obs, oldType, newType) -> updateCorporateFields());
+        typeBox.getItems().addAll(SIMPLE, CORPORATE);
+        typeBox.setValue(SIMPLE);
+        typeBox.setOnAction(e -> updateFields());
 
         GridPane grid = new GridPane();
         grid.setHgap(10);
         grid.setVgap(8);
-        grid.setPadding(new Insets(15));
+        grid.setPadding(new Insets(10));
         grid.addRow(0, new Label("Тип:"), typeBox);
         grid.addRow(1, new Label("Имя:"), nameField);
         grid.addRow(2, new Label("Телефон:"), phoneField);
-        grid.addRow(3, new Label("E-mail:"), emailField);
-        grid.addRow(4, new Label("Организация:"), orgField);
-        grid.addRow(5, positionLabel, positionField);
-        grid.addRow(6, internalLabel, internalField);
+        grid.addRow(3, new Label("Email:"), emailField);
+        grid.addRow(4, new Label("Организация:"), organizationField);
+        grid.addRow(5, new Label("Должность:"), positionField);
+        grid.addRow(6, new Label("Внутр. номер:"), internalField);
         getDialogPane().setContent(grid);
 
-        if (existing != null) {
-            fill(existing);
+        if (contact != null) {
+            fill(contact);
         }
-        updateCorporateFields();
+        updateFields();
 
-        Button saveButton = (Button) getDialogPane().lookupButton(saveType);
-        saveButton.addEventFilter(ActionEvent.ACTION, event -> {
-            List<String> errors = validate(buildContact());
+        Button okButton = (Button) getDialogPane().lookupButton(ButtonType.OK);
+        okButton.addEventFilter(ActionEvent.ACTION, event -> {
+            List<String> errors = validate(createContact());
             if (!errors.isEmpty()) {
-                Alerts.warning("Некорректные данные", String.join("\n", errors));
+                Alerts.error(String.join("\n", errors));
                 event.consume();
             }
         });
 
-        setResultConverter(button -> button == saveType ? buildContact() : null);
+        setResultConverter(button -> button == ButtonType.OK ? createContact() : null);
     }
 
     private void fill(Contact contact) {
-        typeBox.setValue(contact instanceof CorporateContact ? TYPE_CORPORATE : TYPE_CONTACT);
+        typeBox.setValue(contact instanceof CorporateContact ? CORPORATE : SIMPLE);
         typeBox.setDisable(true);
         nameField.setText(contact.getName());
         phoneField.setText(contact.getPhone());
         emailField.setText(contact.getEmail());
-        orgField.setText(contact.getOrganization());
-        if (contact instanceof CorporateContact cc) {
-            positionField.setText(cc.getPosition());
-            internalField.setText(cc.getInternalNumber());
+        organizationField.setText(contact.getOrganization());
+        if (contact instanceof CorporateContact corporate) {
+            positionField.setText(corporate.getPosition());
+            internalField.setText(corporate.getInternalNumber());
         }
     }
 
-    private boolean isCorporate() {
-        return TYPE_CORPORATE.equals(typeBox.getValue());
+    private void updateFields() {
+        boolean corporate = CORPORATE.equals(typeBox.getValue());
+        positionField.setDisable(!corporate);
+        internalField.setDisable(!corporate);
     }
 
-    private void updateCorporateFields() {
-        boolean visible = isCorporate();
-        for (Node node : new Node[]{positionLabel, positionField, internalLabel, internalField}) {
-            node.setVisible(visible);
-            node.setManaged(visible);
-        }
-        if (getDialogPane().getScene() != null && getDialogPane().getScene().getWindow() != null) {
-            getDialogPane().getScene().getWindow().sizeToScene();
-        }
-    }
-
-    private Contact buildContact() {
+    private Contact createContact() {
         String name = nameField.getText().trim();
         String phone = phoneField.getText().trim();
         String email = emailField.getText().trim();
-        String org = orgField.getText().trim();
-        if (isCorporate()) {
-            return new CorporateContact(name, phone, email, org,
+        String organization = organizationField.getText().trim();
+        if (CORPORATE.equals(typeBox.getValue())) {
+            return new CorporateContact(name, phone, email, organization,
                     positionField.getText().trim(), internalField.getText().trim());
         }
-        return new Contact(name, phone, email, org);
+        return new Contact(name, phone, email, organization);
     }
 
-    private static List<String> validate(Contact contact) {
+    private List<String> validate(Contact contact) {
         if (contact instanceof Editable editable) {
             return editable.validate();
         }
-        return contact.getName().isEmpty() ? List.of("Пустое имя") : List.of();
-    }
-
-    private static TextField field(String prompt) {
-        TextField field = new TextField();
-        field.setPromptText(prompt);
-        field.setPrefColumnCount(22);
-        return field;
+        if (contact.getName().isEmpty()) {
+            return List.of("Пустое имя");
+        }
+        return List.of();
     }
 }

@@ -5,12 +5,10 @@ import java.util.List;
 public class LoadResult {
     private final int loaded;
     private final List<CsvParseException> errors;
-    private final boolean cancelled;
 
-    public LoadResult(int loaded, List<CsvParseException> errors, boolean cancelled) {
+    public LoadResult(int loaded, List<CsvParseException> errors) {
         this.loaded = loaded;
         this.errors = errors;
-        this.cancelled = cancelled;
     }
 
     public int getLoaded() {
@@ -23,9 +21,5 @@ public class LoadResult {
 
     public boolean hasErrors() {
         return !errors.isEmpty();
-    }
-
-    public boolean isCancelled() {
-        return cancelled;
     }
 }

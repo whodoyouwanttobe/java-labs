@@ -2,174 +2,141 @@ package org.example.bench;
 
 import org.example.generator.ContactGenerator;
 import org.example.model.Contact;
-import org.example.store.ContactStores;
-import org.example.store.Trie;
-import org.example.store.TrieStore;
+import org.example.store.ContactStore;
 
-import java.util.Locale;
-import java.util.Map;
-import java.util.Random;
-import java.util.SortedMap;
 import java.util.TreeMap;
 
 public class Benchmark {
 
     private static final int[] SIZES = {10_000, 100_000};
     private static final int RUNS = 5;
-    private static final int PREFIX_QUERIES = 1_000;
+    private static final int PREFIX_QUERIES = 1000;
     private static final int PREFIX_LIMIT = 10;
 
-    public static void main(String[] args) {
-        for (int i = 0; i < 3; i++) {
-            measure(10_000);
-        }
+    private static long checksum;
 
+    public static void main(String[] args) {
         System.out.println("| N | Операция | Trie, мс | TreeMap, мс |");
         System.out.println("|---|---|---|---|");
         for (int n : SIZES) {
-            double[][] sum = new double[2][5];
-            for (int r = 0; r < RUNS; r++) {
-                double[][] res = measure(n);
-                for (int s = 0; s < 2; s++) {
-                    for (int op = 0; op < 5; op++) {
-                        sum[s][op] += res[s][op];
-                    }
-                }
+            Contact[] contacts = generate(n);
+            String[] prefixes = prefixes(contacts);
+            measure(contacts, prefixes);
+
+            double[] trie = new double[5];
+            double[] treeMap = new double[5];
+            for (int run = 0; run < RUNS; run++) {
+                add(trie, measure(contacts, prefixes));
+                add(treeMap, measureTreeMap(contacts, prefixes));
             }
-            String[] ops = {
-                    "вставка " + n,
-                    "поиск " + n,
-                    "автодополнение x" + PREFIX_QUERIES,
-                    "подсчёт в поддереве x" + PREFIX_QUERIES,
-                    "удаление " + n
-            };
-            for (int op = 0; op < ops.length; op++) {
-                System.out.printf(Locale.ROOT, "| %d | %s | %.2f | %.2f |%n",
-                        n, ops[op], sum[0][op] / RUNS, sum[1][op] / RUNS);
+            String[] operations = {"вставка", "поиск", "автодополнение x1000", "подсчёт в поддереве x1000", "удаление"};
+            for (int i = 0; i < operations.length; i++) {
+                System.out.printf("| %d | %s | %.2f | %.2f |%n", n, operations[i], trie[i] / RUNS, treeMap[i] / RUNS);
             }
         }
+        System.out.println("Контрольная сумма: " + checksum);
     }
 
-    private static double[][] measure(int n) {
-        TrieStore<Contact> tmp = ContactStores.create();
-        new ContactGenerator(7).generateInto(tmp, n);
-        Contact[] data = tmp.toArray();
-        shuffle(data, new Random(3));
-
-        String[] prefixes = new String[PREFIX_QUERIES];
-        Random rnd = new Random(5);
-        for (int i = 0; i < prefixes.length; i++) {
-            String name = Trie.normalize(data[rnd.nextInt(n)].getName());
-            prefixes[i] = name.substring(0, Math.min(name.length(), 1 + rnd.nextInt(8)));
-        }
-
-        return new double[][]{measureTrie(data, prefixes), measureTreeMap(data, prefixes)};
-    }
-
-    private static double[] measureTrie(Contact[] data, String[] prefixes) {
-        TrieStore<Contact> store = ContactStores.create();
-        double[] t = new double[5];
-        long sink = 0;
+    private static double[] measure(Contact[] contacts, String[] prefixes) {
+        ContactStore store = new ContactStore();
+        double[] times = new double[5];
 
         long start = System.nanoTime();
-        for (Contact c : data) {
+        for (Contact c : contacts) {
             store.add(c);
         }
-        t[0] = ms(start);
+        times[0] = millis(start);
 
         start = System.nanoTime();
-        for (Contact c : data) {
-            sink += store.findByKey(c.getName()).getPhone().length();
+        for (Contact c : contacts) {
+            checksum += store.find(c.getName()).getPhone().length();
         }
-        t[1] = ms(start);
+        times[1] = millis(start);
 
         start = System.nanoTime();
-        for (String p : prefixes) {
-            sink += store.findByPrefix(p, PREFIX_LIMIT).length;
+        for (String prefix : prefixes) {
+            checksum += store.findByPrefix(prefix, PREFIX_LIMIT).length;
         }
-        t[2] = ms(start);
+        times[2] = millis(start);
 
         start = System.nanoTime();
-        for (String p : prefixes) {
-            sink += store.countByPrefix(p);
+        for (String prefix : prefixes) {
+            checksum += store.countByPrefix(prefix);
         }
-        t[3] = ms(start);
+        times[3] = millis(start);
 
         start = System.nanoTime();
-        for (Contact c : data) {
-            store.removeByKey(c.getName());
+        for (Contact c : contacts) {
+            store.remove(c.getName());
         }
-        t[4] = ms(start);
-
-        blackhole(sink);
-        return t;
+        times[4] = millis(start);
+        return times;
     }
 
-    private static double[] measureTreeMap(Contact[] data, String[] prefixes) {
+    private static double[] measureTreeMap(Contact[] contacts, String[] prefixes) {
         TreeMap<String, Contact> map = new TreeMap<>();
-        double[] t = new double[5];
-        long sink = 0;
+        double[] times = new double[5];
 
         long start = System.nanoTime();
-        for (Contact c : data) {
-            map.putIfAbsent(Trie.normalize(c.getName()), c);
+        for (Contact c : contacts) {
+            map.put(c.getName().toLowerCase(), c);
         }
-        t[0] = ms(start);
+        times[0] = millis(start);
 
         start = System.nanoTime();
-        for (Contact c : data) {
-            sink += map.get(Trie.normalize(c.getName())).getPhone().length();
+        for (Contact c : contacts) {
+            checksum += map.get(c.getName().toLowerCase()).getPhone().length();
         }
-        t[1] = ms(start);
+        times[1] = millis(start);
 
         start = System.nanoTime();
-        for (String p : prefixes) {
+        for (String prefix : prefixes) {
             int taken = 0;
-            for (Map.Entry<String, Contact> e : prefixRange(map, p).entrySet()) {
-                if (taken++ == PREFIX_LIMIT) {
+            for (Contact c : map.subMap(prefix, prefix + Character.MAX_VALUE).values()) {
+                checksum += c.getName().length();
+                if (++taken == PREFIX_LIMIT) {
                     break;
                 }
-                sink += e.getValue().getName().length();
             }
         }
-        t[2] = ms(start);
+        times[2] = millis(start);
 
         start = System.nanoTime();
-        for (String p : prefixes) {
-            sink += prefixRange(map, p).size();
+        for (String prefix : prefixes) {
+            checksum += map.subMap(prefix, prefix + Character.MAX_VALUE).size();
         }
-        t[3] = ms(start);
+        times[3] = millis(start);
 
         start = System.nanoTime();
-        for (Contact c : data) {
-            map.remove(Trie.normalize(c.getName()));
+        for (Contact c : contacts) {
+            map.remove(c.getName().toLowerCase());
         }
-        t[4] = ms(start);
-
-        blackhole(sink);
-        return t;
+        times[4] = millis(start);
+        return times;
     }
 
-    private static SortedMap<String, Contact> prefixRange(TreeMap<String, Contact> map, String prefix) {
-        return map.subMap(prefix, prefix + Character.MAX_VALUE);
+    private static Contact[] generate(int n) {
+        ContactStore store = new ContactStore();
+        new ContactGenerator(7).fill(store, n);
+        return store.toArray();
     }
 
-    private static void shuffle(Contact[] a, Random rnd) {
-        for (int i = a.length - 1; i > 0; i--) {
-            int j = rnd.nextInt(i + 1);
-            Contact tmp = a[i];
-            a[i] = a[j];
-            a[j] = tmp;
+    private static String[] prefixes(Contact[] contacts) {
+        String[] prefixes = new String[PREFIX_QUERIES];
+        for (int i = 0; i < PREFIX_QUERIES; i++) {
+            String name = contacts[i * contacts.length / PREFIX_QUERIES].getName().toLowerCase();
+            prefixes[i] = name.substring(0, 1 + i % 8);
+        }
+        return prefixes;
+    }
+
+    private static void add(double[] sum, double[] times) {
+        for (int i = 0; i < sum.length; i++) {
+            sum[i] += times[i];
         }
     }
 
-    private static double ms(long start) {
+    private static double millis(long start) {
         return (System.nanoTime() - start) / 1_000_000.0;
-    }
-
-    private static void blackhole(long value) {
-        if (value == 42) {
-            System.out.print("");
-        }
     }
 }

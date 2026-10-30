@@ -1,6 +1,9 @@
 package org.example.csv;
 
 public class CsvParseException extends Exception {
+
+    private static final long serialVersionUID = 1L;
+
     private final int lineNumber;
     private final CsvErrorCode errorCode;
 
