@@ -3,13 +3,11 @@ package org.example.ui;
 import javafx.application.Application;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
-import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
-import javafx.scene.control.ProgressBar;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.BorderPane;
@@ -42,8 +40,6 @@ public class MainApp extends Application {
     private ContactStore store = new ContactStore();
     private final ObservableList<Contact> rows = FXCollections.observableArrayList();
     private String lastKey;
-    private Task<?> currentTask;
-
     private Stage stage;
     private final ContactTable table = new ContactTable(rows);
     private final TriePane triePane = new TriePane();
@@ -51,17 +47,31 @@ public class MainApp extends Application {
     private final TextField prefixField = new TextField();
     private final TextField countField = new TextField("1000");
     private final Label foundLabel = new Label();
-    private final Label sizeLabel = new Label();
-    private final Label statusLabel = new Label("Готово");
-    private final ProgressBar progressBar = new ProgressBar(0);
-    private final Button cancelButton = new Button("Отмена");
     private final Button editButton = new Button("Изменить");
-    private final HBox buttonBar = new HBox(8);
     private final HBox searchBar = new HBox(8);
+    private final HBox buttonBar = new HBox(8);
+    private final StatusBarView statusBar = new StatusBarView();
+    private final TaskRunner runner = new TaskRunner(statusBar, busy -> {
+        buttonBar.setDisable(busy);
+        searchBar.setDisable(busy);
+        statusBar.setCancelEnabled(busy);
+    });
 
     @Override
     public void start(Stage stage) {
         this.stage = stage;
+        runner.setOnCancelled(() -> {
+            refresh();
+            statusBar.setStatus("Операция отменена");
+        });
+        runner.setOnError(error -> {
+            statusBar.setStatus("Ошибка");
+            if (error instanceof SerializationException se) {
+                Alerts.error("Файл не прочитан [" + se.getError() + "]\n" + error.getMessage());
+            } else {
+                Alerts.error(error.getMessage());
+            }
+        });
         watchSelection();
         createButtonBar();
         createSearchBar();
@@ -75,8 +85,7 @@ public class MainApp extends Application {
         BorderPane root = new BorderPane();
         root.setTop(top);
         root.setCenter(center);
-        root.setBottom(createStatusBar());
-
+        root.setBottom(statusBar.getRoot());
         stage.setTitle("Справочник контактов");
         stage.setScene(new Scene(root, 1200, 700));
         stage.show();
@@ -135,17 +144,6 @@ public class MainApp extends Application {
         searchBar.setAlignment(Pos.CENTER_LEFT);
     }
 
-    private HBox createStatusBar() {
-        cancelButton.setDisable(true);
-        cancelButton.setOnAction(e -> currentTask.cancel());
-        progressBar.setPrefWidth(200);
-
-        HBox statusBar = new HBox(10, statusLabel, progressBar, cancelButton, sizeLabel);
-        statusBar.setAlignment(Pos.CENTER_LEFT);
-        statusBar.setPadding(new Insets(5, 8, 5, 8));
-        return statusBar;
-    }
-
     private void loadCsv() {
         File file = csvChooser().showOpenDialog(stage);
         if (file == null) {
@@ -153,16 +151,17 @@ public class MainApp extends Application {
         }
         ContactStore newStore = new ContactStore();
         LoadCsvTask task = new LoadCsvTask(file.toPath(), newStore);
-        runTask(task, () -> {
+        runner.setOnSuccess(() -> {
             store = newStore;
             lastKey = null;
             refresh();
             LoadResult result = task.getValue();
-            statusLabel.setText("Загружено контактов: " + result.getLoaded());
+            statusBar.setStatus("Загружено контактов: " + result.getLoaded());
             if (result.hasErrors()) {
                 showLoadErrors(result);
             }
         });
+        runner.run(task);
     }
 
     private void showLoadErrors(LoadResult result) {
@@ -191,8 +190,9 @@ public class MainApp extends Application {
         if (file == null) {
             return;
         }
-        runTask(new SaveCsvTask(file.toPath(), store.toArray()),
-                () -> statusLabel.setText("Сохранено в " + file.getName()));
+        runner.setOnSuccess(
+                () -> statusBar.setStatus("Сохранено в " + file.getName()));
+        runner.run(new SaveCsvTask(file.toPath(), store.toArray()));
     }
 
     private FileChooser csvChooser() {
@@ -208,12 +208,13 @@ public class MainApp extends Application {
         }
         ContactStore newStore = new ContactStore();
         ImportTask task = new ImportTask(file.toPath(), newStore);
-        runTask(task, () -> {
+        runner.setOnSuccess(() -> {
             store = newStore;
             lastKey = null;
             refresh();
-            statusLabel.setText("Импортировано контактов: " + task.getValue());
+            statusBar.setStatus("Импортировано контактов: " + task.getValue());
         });
+        runner.run(task);
     }
 
     private void exportFile() {
@@ -227,8 +228,9 @@ public class MainApp extends Application {
         if (file == null) {
             return;
         }
-        runTask(new ExportTask(file.toPath(), store.toArray()),
-                () -> statusLabel.setText("Экспортировано в " + file.getName()));
+        runner.setOnSuccess(
+                () -> statusBar.setStatus("Экспортировано в " + file.getName()));
+        runner.run(new ExportTask(file.toPath(), store.toArray()));
     }
 
     private FileChooser formatChooser() {
@@ -246,7 +248,7 @@ public class MainApp extends Application {
                 lastKey = contact.getName();
                 refresh();
                 table.getSelectionModel().select(contact);
-                statusLabel.setText("Добавлен " + contact.getName());
+                statusBar.setStatus("Добавлен " + contact.getName());
             } catch (DuplicateKeyException e) {
                 Alerts.error(e.getMessage());
             }
@@ -264,7 +266,7 @@ public class MainApp extends Application {
                 lastKey = changed.getName();
                 refresh();
                 table.getSelectionModel().select(changed);
-                statusLabel.setText("Изменён " + changed.getName());
+                statusBar.setStatus("Изменён " + changed.getName());
             } catch (DuplicateKeyException | KeyNotFoundException e) {
                 Alerts.error(e.getMessage());
             }
@@ -279,7 +281,7 @@ public class MainApp extends Application {
         store.remove(selected.getName());
         lastKey = selected.getName();
         refresh();
-        statusLabel.setText("Удалён " + selected.getName());
+        statusBar.setStatus("Удалён " + selected.getName());
     }
 
     private void clearAll() {
@@ -287,7 +289,7 @@ public class MainApp extends Application {
             store.clear();
             lastKey = null;
             refresh();
-            statusLabel.setText("Справочник очищен");
+            statusBar.setStatus("Справочник очищен");
         }
     }
 
@@ -299,14 +301,14 @@ public class MainApp extends Application {
         lastKey = name;
         Contact found = store.find(name);
         if (found == null) {
-            statusLabel.setText("Не найден: " + name);
+            statusBar.setStatus("Не найден: " + name);
             drawTrie();
             return;
         }
         prefixField.clear();
         table.getSelectionModel().select(found);
         table.scrollTo(found);
-        statusLabel.setText("Найден: " + found.getName());
+        statusBar.setStatus("Найден: " + found.getName());
         drawTrie();
     }
 
@@ -323,61 +325,18 @@ public class MainApp extends Application {
             return;
         }
         GenerateTask task = new GenerateTask(store, count);
-        runTask(task, () -> {
+        runner.setOnSuccess(() -> {
             refresh();
-            statusLabel.setText("Сгенерировано контактов: " + task.getValue());
+            statusBar.setStatus("Сгенерировано контактов: " + task.getValue());
         });
-    }
-
-    private void runTask(Task<?> task, Runnable onSuccess) {
-        currentTask = task;
-        setBusy(true);
-        progressBar.progressProperty().bind(task.progressProperty());
-        statusLabel.textProperty().bind(task.messageProperty());
-
-        task.setOnSucceeded(e -> {
-            finishTask();
-            onSuccess.run();
-        });
-        task.setOnCancelled(e -> {
-            finishTask();
-            refresh();
-            statusLabel.setText("Операция отменена");
-        });
-        task.setOnFailed(e -> {
-            finishTask();
-            statusLabel.setText("Ошибка");
-            Throwable error = task.getException();
-            if (error instanceof SerializationException serializationError) {
-                Alerts.error("Файл не прочитан [" + serializationError.getError() + "]\n" + error.getMessage());
-            } else {
-                Alerts.error(error.getMessage());
-            }
-        });
-
-        Thread thread = new Thread(task);
-        thread.setDaemon(true);
-        thread.start();
-    }
-
-    private void finishTask() {
-        progressBar.progressProperty().unbind();
-        statusLabel.textProperty().unbind();
-        progressBar.setProgress(0);
-        setBusy(false);
-    }
-
-    private void setBusy(boolean busy) {
-        buttonBar.setDisable(busy);
-        searchBar.setDisable(busy);
-        cancelButton.setDisable(!busy);
+        runner.run(task);
     }
 
     private void refresh() {
         String prefix = prefixField.getText();
         rows.setAll(store.findByPrefix(prefix, store.size()));
         foundLabel.setText("Найдено: " + store.countByPrefix(prefix));
-        sizeLabel.setText("Всего контактов: " + store.size() + ", узлов в дереве: " + store.nodeCount());
+        statusBar.setSize("Всего контактов: " + store.size() + ", узлов в дереве: " + store.nodeCount());
         drawTrie();
     }
 
