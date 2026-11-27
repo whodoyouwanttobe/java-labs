@@ -1,0 +1,5 @@
+{
+  "schema_version" : 1,
+  "contacts" : [ { "type" : "Corporate", "name" : "Пётр Орлов", "position" : "Юрист", "internalNumber" : "12a" } ]
+}
+
