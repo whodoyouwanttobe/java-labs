@@ -156,9 +156,14 @@ public class MainApp extends Application {
         editButton.setDisable(true);
         Button deleteButton = new Button("Удалить");
         deleteButton.setOnAction(e -> deleteContact());
+        Button refreshButton = new Button("Обновить");
+        refreshButton.setOnAction(e -> {
+            refresh();
+            statusBar.setStatus("Данные обновлены");
+        });
 
         buttonBar.getChildren().addAll(loadButton, saveButton, importButton, exportButton,
-                addButton, editButton, deleteButton);
+                addButton, editButton, deleteButton, refreshButton);
         buttonBar.setAlignment(Pos.CENTER_LEFT);
     }
 
