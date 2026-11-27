@@ -25,7 +25,7 @@ public class BinarySerializer implements Serializer {
 
     @Override
     public void save(Contact[] contacts, Path file, int version) throws IOException {
-        if (version < 1 || version > SCHEMA_VERSION) {
+        if (version < MIN_SCHEMA_VERSION || version > SCHEMA_VERSION) {
             throw new IllegalArgumentException("Неверная версия: " + version);
         }
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();

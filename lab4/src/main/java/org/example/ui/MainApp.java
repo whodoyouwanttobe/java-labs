@@ -223,7 +223,7 @@ public class MainApp extends Application {
             Alerts.error("Справочник пуст, нечего сохранять");
             return;
         }
-        Optional<Integer> version = ExportVersionDialog.chooseVersion(List.of(3, 2, 1));
+        Optional<Integer> version = ExportVersionDialog.chooseVersion(Serializer.SUPPORTED_VERSIONS);
         if (version.isEmpty()) {
             return;
         }

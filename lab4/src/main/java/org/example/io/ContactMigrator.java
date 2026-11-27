@@ -47,9 +47,10 @@ public class ContactMigrator {
     }
 
     public static void checkVersion(int version) throws SerializationException {
-        if (version < 1 || version > Serializer.SCHEMA_VERSION) {
+        if (version < Serializer.MIN_SCHEMA_VERSION || version > Serializer.SCHEMA_VERSION) {
             throw new SerializationException("Версия файла " + version
-                    + " не поддерживается, допустимы 1.." + Serializer.SCHEMA_VERSION);
+                    + " не поддерживается, допустимы " + Serializer.MIN_SCHEMA_VERSION
+                    + ".." + Serializer.SCHEMA_VERSION);
         }
     }
 
