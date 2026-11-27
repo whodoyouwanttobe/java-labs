@@ -1,0 +1,46 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Окно",
+            "request": "launch",
+            "mainClass": "org.example.Main",
+            "projectName": "lab4",
+            "cwd": "${workspaceFolder}",
+            "console": "internalConsole",
+            "vmArgs": "-Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8 -Dfile.encoding=UTF-8"
+        },
+        {
+            "type": "java",
+            "name": "FormatComparison",
+            "request": "launch",
+            "mainClass": "org.example.demo.FormatComparison",
+            "projectName": "lab4",
+            "cwd": "${workspaceFolder}",
+            "console": "internalConsole",
+            "vmArgs": "-Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8 -Dfile.encoding=UTF-8"
+        },
+        {
+            "type": "java",
+            "name": "RaceDemo",
+            "request": "launch",
+            "mainClass": "org.example.demo.RaceDemo",
+            "projectName": "lab4",
+            "cwd": "${workspaceFolder}",
+            "console": "internalConsole",
+            "vmArgs": "-Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8 -Dfile.encoding=UTF-8"
+        },
+        {
+            "type": "java",
+            "name": "Benchmark",
+            "request": "launch",
+            "mainClass": "org.example.bench.Benchmark",
+            "projectName": "lab4",
+            "cwd": "${workspaceFolder}",
+            "console": "internalConsole",
+            "vmArgs": "-Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8 -Dfile.encoding=UTF-8"
+        }
+    ]
+}
+
