@@ -81,6 +81,11 @@ public class ServiceContactFacade implements ContactFacade {
     }
 
     @Override
+    public void addAll(Contact[] contacts) {
+        service.addAll(contacts);
+    }
+
+    @Override
     public void addChangeListener(Runnable listener) {
         service.addChangeListener(listener);
     }

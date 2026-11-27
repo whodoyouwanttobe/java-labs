@@ -32,5 +32,7 @@ public interface ContactFacade {
 
     void replaceAll(Contact[] contacts);
 
+    void addAll(Contact[] contacts);
+
     void addChangeListener(Runnable listener);
 }
